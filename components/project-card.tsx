@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Layers, ShieldAlert } from "lucide-react";
+import { ArrowRight, Download, Layers, ShieldAlert } from "lucide-react";
 import { ProjectStatusBadge } from "@/components/project-status-badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectSummary } from "@/types/project";
@@ -60,10 +60,21 @@ export function ProjectCard({ project, deleteAction }: ProjectCardProps) {
       </CardContent>
       <CardFooter className="justify-between">
         <p className="text-sm text-muted-foreground">Updated {formatRelative(project.updatedAt)}</p>
-        <Link href={`/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-medium text-primary transition hover:opacity-80">
-          Open workspace
-          <ArrowRight className="h-4 w-4" />
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href={`/api/projects/${project.id}/export-json`}
+            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+            aria-label={`Export ${project.name} as JSON`}
+            download
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export JSON
+          </Link>
+          <Link href={`/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-medium text-primary transition hover:opacity-80">
+            Open workspace
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
       </CardFooter>
     </Card>
   );

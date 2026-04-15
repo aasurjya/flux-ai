@@ -10,7 +10,7 @@ import {
   runExportJob,
   getExportFilePath
 } from "./project-store";
-import { deleteProject } from "./project-store";
+import { deleteProject, importProject } from "./project-store";
 import { createStubAiClient } from "./ai/stub-client";
 
 describe("generateProject integration (stub AI client)", () => {
@@ -237,6 +237,72 @@ describe("runExportJob integration", () => {
   it("deleteProject returns false for unknown id", async () => {
     const removed = await deleteProject("never-existed");
     expect(removed).toBe(false);
+  });
+
+  it("importProject assigns a fresh id even when source id matches existing", async () => {
+    const created = await createProject({
+      name: "Original",
+      prompt: "p",
+      constraints: [],
+      preferredParts: []
+    });
+    // Export-like payload reusing the same id
+    const source = { ...created, updatedAt: new Date().toISOString() };
+    const imported = await importProject(source);
+    expect(imported.id).not.toBe(created.id);
+    expect(imported.id.startsWith("original")).toBe(true);
+  });
+
+  it("importProject regenerates revision ids to prevent collisions", async () => {
+    const created = await createProject({
+      name: "Src",
+      prompt: "p",
+      constraints: [],
+      preferredParts: []
+    });
+    const oldRevId = created.revisions[0].id;
+    const imported = await importProject(created);
+    expect(imported.revisions[0].id).not.toBe(oldRevId);
+    expect(imported.revisions[0].id.startsWith("rev-")).toBe(true);
+  });
+
+  it("importProject strips exportJobs from the source", async () => {
+    const source: Parameters<typeof importProject>[0] = {
+      id: "any",
+      name: "With Jobs",
+      prompt: "p",
+      status: "exported",
+      updatedAt: new Date().toISOString(),
+      constraints: [],
+      outputs: {
+        requirements: [],
+        architecture: [],
+        bom: [],
+        validations: [],
+        exportReady: false
+      },
+      revisions: [
+        {
+          id: "rev-stale",
+          title: "seed",
+          description: "",
+          createdAt: new Date().toISOString(),
+          changes: []
+        }
+      ],
+      exportJobs: [
+        {
+          id: "export-stale",
+          projectId: "any",
+          status: "completed",
+          format: "kicad",
+          createdAt: new Date().toISOString(),
+          logs: ["old"]
+        }
+      ]
+    };
+    const imported = await importProject(source);
+    expect(imported.exportJobs).toEqual([]);
   });
 
   it("garbage-collects old export zips to keep disk bounded", async () => {

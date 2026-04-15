@@ -248,6 +248,52 @@ export async function deleteProject(projectId: string): Promise<boolean> {
   });
 }
 
+/**
+ * Import a project from an external JSON payload (e.g. a previously
+ * exported .flux.json). The source has already been validated against
+ * ProjectSummarySchema by the caller.
+ *
+ * Safety:
+ *   - Always assigns a FRESH project id (collision-safe slug + suffix)
+ *     so imports never clobber existing projects
+ *   - Regenerates every revision id via randomUUID (source ids may
+ *     collide with existing revisions OR with each other after import)
+ *   - Strips exportJobs — they reference zip files on the original
+ *     machine's disk that don't exist here. Leaving them would produce
+ *     broken download links in the UI.
+ *   - Uses a fresh updatedAt timestamp
+ */
+export async function importProject(source: ProjectSummary): Promise<ProjectSummary> {
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const existingIds = new Set([...storedProjects, ...mockProjects].map((p) => p.id));
+
+    const baseSlug = slugify(source.name) || `imported-${Date.now()}`;
+    let newId = baseSlug;
+    let suffix = 2;
+    while (existingIds.has(newId)) {
+      newId = `${baseSlug}-${suffix}`;
+      suffix += 1;
+    }
+
+    const imported: ProjectSummary = {
+      ...source,
+      id: newId,
+      updatedAt: new Date().toISOString(),
+      revisions: source.revisions.map((r) => ({
+        ...r,
+        id: `rev-${randomUUID()}`
+      })),
+      // Always strip export jobs — their zip files don't exist on this host
+      exportJobs: []
+    };
+
+    storedProjects.unshift(imported);
+    await writeStoredProjects(storedProjects);
+    return imported;
+  });
+}
+
 interface AddRevisionInput {
   projectId: string;
   title: string;
