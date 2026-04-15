@@ -8,6 +8,23 @@ import { generateNetlistXml } from "./netlist-gen";
 import { generateBomCsv } from "./bom-csv";
 import { generateKicadProject } from "./project-file";
 
+/**
+ * Convert a human-friendly project name into a filesystem-safe base name.
+ * Preserves case, replaces whitespace with underscores, strips path
+ * separators + ASCII control chars. Falls back to "project" for empty
+ * results. Used only for FILENAMES — the title_block inside the schematic
+ * retains the original human-readable name.
+ */
+export function filenameSlug(name: string): string {
+  const cleaned = name
+    .replace(/[\x00-\x1f\x7f]/g, "") // control chars
+    .replace(/[/\\:*?"<>|]/g, "")    // Windows-unsafe chars
+    .replace(/\s+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return cleaned.length > 0 ? cleaned : "project";
+}
+
 export interface BundleInput {
   projectName: string;
   bom: BomItem[];
@@ -43,26 +60,27 @@ export async function buildKicadExport(input: BundleInput): Promise<BundleResult
     throw new Error("buildKicadExport: bom must be non-empty");
   }
   const { projectName, bom, architectureBlocks, outPath } = input;
+  const slug = filenameSlug(projectName);
 
   const entries: BundleEntry[] = [
     {
-      name: `${projectName}.kicad_pro`,
+      name: `${slug}.kicad_pro`,
       content: generateKicadProject({ projectName })
     },
     {
-      name: `${projectName}.kicad_sch`,
+      name: `${slug}.kicad_sch`,
       content: generateSchematic({ projectName, libName: LIB_NAME, bom, architectureBlocks })
     },
     {
-      name: `${projectName}.kicad_sym`,
+      name: `${slug}.kicad_sym`,
       content: generateSymbolLibrary(LIB_NAME, bom)
     },
     {
-      name: `${projectName}-netlist.xml`,
+      name: `${slug}-netlist.xml`,
       content: generateNetlistXml({ projectName, bom, architectureBlocks })
     },
     {
-      name: `${projectName}-bom.csv`,
+      name: `${slug}-bom.csv`,
       content: generateBomCsv(bom)
     }
   ];

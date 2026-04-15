@@ -47,6 +47,72 @@ describe("generateNetlistXml", () => {
     expect(netCount).toBe(1);
   });
 
+  it("names power nets semantically (VCC_3V3, VBUS) not by block id", () => {
+    const out = generateNetlistXml({
+      projectName: "x",
+      bom: [
+        { id: "u1", designator: "U1", name: "ESP32-S3", quantity: 1, package: "Module", status: "selected" },
+        { id: "u2", designator: "U2", name: "3V3 LDO", quantity: 1, package: "SOT-223", status: "selected" }
+      ],
+      architectureBlocks: [
+        { id: "mcu", label: "ESP32-S3 MCU", kind: "processing", connections: ["3v3-rail"] },
+        { id: "3v3-rail", label: "3.3V Rail", kind: "power", connections: ["mcu"] }
+      ]
+    });
+    expect(out).toContain('name="/VCC_3V3"');
+    expect(out).not.toContain("_mcu_3v3-rail"); // no block-id noise in net names
+  });
+
+  it("names bus nets semantically (I2C_BUS, SPI_BUS, SWD)", () => {
+    const out = generateNetlistXml({
+      projectName: "x",
+      bom: [
+        { id: "u1", designator: "U1", name: "MCU", quantity: 1, package: "Module", status: "selected" },
+        { id: "u2", designator: "U2", name: "IMU", quantity: 1, package: "LGA", status: "selected" }
+      ],
+      architectureBlocks: [
+        { id: "mcu", label: "MCU", kind: "processing", connections: ["i2c-bus"] },
+        { id: "i2c-bus", label: "I2C bus to IMU", kind: "interface", connections: ["mcu"] }
+      ]
+    });
+    expect(out).toContain('name="/I2C_BUS"');
+  });
+
+  it("merges multiple edges that land on the same semantic net", () => {
+    const out = generateNetlistXml({
+      projectName: "x",
+      bom: [
+        { id: "u1", designator: "U1", name: "MCU", quantity: 1, package: "Module", status: "selected" },
+        { id: "u2", designator: "U2", name: "Sensor", quantity: 1, package: "LGA", status: "selected" },
+        { id: "u3", designator: "U3", name: "LDO", quantity: 1, package: "SOT-223", status: "selected" }
+      ],
+      architectureBlocks: [
+        { id: "mcu", label: "MCU", kind: "processing", connections: ["3v3"] },
+        { id: "sens", label: "Sensor", kind: "sensor", connections: ["3v3"] },
+        { id: "3v3", label: "3V3 Rail", kind: "power", connections: ["mcu", "sens"] }
+      ]
+    });
+    // 3V3 powers both MCU (VCC_3V3) and sensor (VCC_SENSOR) — 2 distinct nets
+    expect(out).toContain('"/VCC_3V3"');
+    expect(out).toContain('"/VCC_SENSOR"');
+  });
+
+  it("uses differentiated pin numbers instead of pin=1 on both ends", () => {
+    const out = generateNetlistXml({
+      projectName: "x",
+      bom: [
+        { id: "u1", designator: "U1", name: "MCU", quantity: 1, package: "Module", status: "selected" },
+        { id: "u2", designator: "U2", name: "LDO", quantity: 1, package: "SOT-223", status: "selected" }
+      ],
+      architectureBlocks: [
+        { id: "mcu", label: "MCU", kind: "processing", connections: ["3v3"] },
+        { id: "3v3", label: "3V3 Rail", kind: "power", connections: ["mcu"] }
+      ]
+    });
+    // Processing endpoint on signal side = pin 2; power side = pin 1
+    expect(out).toMatch(/pin="1"[^\n]*\n[^\n]*pin="2"|pin="2"[^\n]*\n[^\n]*pin="1"/);
+  });
+
   it("throws on empty BOM", () => {
     expect(() =>
       generateNetlistXml({ projectName: "x", bom: [], architectureBlocks: blocks })

@@ -25,7 +25,7 @@ describe("buildKicadExport", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("produces a buffer containing the zip entries", async () => {
+  it("produces a buffer with filename-safe entry names (no spaces)", async () => {
     const { buffer, entries } = await buildKicadExport({
       projectName: "Demo Board",
       bom,
@@ -33,13 +33,27 @@ describe("buildKicadExport", () => {
     });
     expect(buffer.length).toBeGreaterThan(500);
     const names = entries.map((e) => e.name).sort();
+    // Spaces in the project name become underscores in filenames
     expect(names).toEqual([
-      "Demo Board-bom.csv",
-      "Demo Board-netlist.xml",
-      "Demo Board.kicad_pro",
-      "Demo Board.kicad_sch",
-      "Demo Board.kicad_sym"
+      "Demo_Board-bom.csv",
+      "Demo_Board-netlist.xml",
+      "Demo_Board.kicad_pro",
+      "Demo_Board.kicad_sch",
+      "Demo_Board.kicad_sym"
     ]);
+  });
+
+  it("strips Windows-unsafe chars from filenames but keeps them in the title_block", async () => {
+    const { entries } = await buildKicadExport({
+      projectName: 'My "Awesome": Board?',
+      bom,
+      architectureBlocks: blocks
+    });
+    const schEntry = entries.find((e) => e.name.endsWith(".kicad_sch"))!;
+    // Filename is safe — no colons, no question marks, no quotes
+    expect(schEntry.name).toBe("My_Awesome_Board.kicad_sch");
+    // But the in-file title retains the human-readable name
+    expect(schEntry.content).toContain('"My \\"Awesome\\": Board?"');
   });
 
   it("writes the bundle to disk when outPath is provided", async () => {
@@ -66,6 +80,16 @@ describe("buildKicadExport", () => {
     expect(byName["X-netlist.xml"].startsWith('<?xml version="1.0"')).toBe(true);
     expect(byName["X-bom.csv"].split("\n")[0]).toBe("Reference,Value,Footprint,Quantity,Status");
     expect(byName["X.kicad_pro"]).toContain('"meta"');
+  });
+
+  it("falls back to 'project' for names that slug to empty", async () => {
+    const { entries } = await buildKicadExport({
+      projectName: "///:::",
+      bom,
+      architectureBlocks: blocks
+    });
+    const names = entries.map((e) => e.name);
+    expect(names.every((n) => n.startsWith("project"))).toBe(true);
   });
 
   it("throws on empty BOM (nothing useful to export)", async () => {

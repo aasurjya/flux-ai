@@ -379,6 +379,45 @@ export function getExportFilePath(jobId: string): string {
 }
 
 /**
+ * Garbage-collect old export zips for a given project. We keep only the
+ * most recent `keepLatest` zip files per project to prevent unbounded
+ * disk growth. Called before writing a new export.
+ *
+ * Without this, every "Export to KiCad" click leaves a zip on disk
+ * forever. A user who iterates on a design 50 times fills their disk
+ * with stale exports. The old downloadUrl links also break — we'd
+ * serve 404 for any GC'd job — so we also prune completed export_jobs
+ * from the project whose zip no longer exists.
+ */
+async function gcOldExports(
+  projectId: string,
+  keepLatest: number,
+  exportJobs: ProjectSummary["exportJobs"]
+): Promise<Set<string>> {
+  const completedJobs = (exportJobs ?? [])
+    .filter((j) => j.projectId === projectId && (j.status === "completed" || j.status === "failed"))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const keepJobIds = new Set(completedJobs.slice(0, keepLatest).map((j) => j.id));
+  const removeJobIds = new Set(
+    completedJobs.slice(keepLatest).map((j) => j.id)
+  );
+
+  for (const jobId of removeJobIds) {
+    try {
+      await fs.unlink(getExportFilePath(jobId));
+    } catch (err) {
+      // File already gone is fine — other errors we ignore to avoid
+      // blocking a new export because of a stale cleanup failure.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        // Swallow other fs errors silently: cleanup must never break
+        // the hot path of a new export.
+      }
+    }
+  }
+  return keepJobIds;
+}
+
+/**
  * Run a KiCad export job synchronously: generate the bundle, persist
  * the zip to disk, and mark the job completed. Failures are captured on
  * the job record so the UI can surface them without crashing the page.
@@ -397,11 +436,20 @@ export async function runExportJob(projectId: string, jobId: string) {
     throw new Error(`Export job not found: ${jobId}`);
   }
 
+  // GC old completed exports (keep latest 3 per project) BEFORE running
+  // the new one. This keeps disk bounded without throwing away the most
+  // recent history the user might still want to re-download.
+  const keepJobIds = await gcOldExports(projectId, 3, jobs);
+  const retainedJobs = jobs.filter(
+    (j) => j.id === jobId || j.status === "pending" || j.status === "running" || keepJobIds.has(j.id)
+  );
+
   // Mark running
-  const runningLogs = [...jobs[jobIndex].logs, "Validating project outputs..."];
-  const runningJob = { ...jobs[jobIndex], status: "running" as const, logs: runningLogs };
-  const runningJobs = [...jobs];
-  runningJobs[jobIndex] = runningJob;
+  const retainedIndex = retainedJobs.findIndex((j) => j.id === jobId);
+  const runningLogs = [...retainedJobs[retainedIndex].logs, "Validating project outputs..."];
+  const runningJob = { ...retainedJobs[retainedIndex], status: "running" as const, logs: runningLogs };
+  const runningJobs = [...retainedJobs];
+  runningJobs[retainedIndex] = runningJob;
   storedProjects[projectIndex] = { ...project, exportJobs: runningJobs };
   await writeStoredProjects(storedProjects);
 

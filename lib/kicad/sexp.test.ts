@@ -37,6 +37,19 @@ describe("sexp builder + serializer", () => {
     expect(serialize(s)).toBe("(xy 10 2.54)");
   });
 
+  it("strips IEEE-754 precision noise from floating-point arithmetic", () => {
+    // 25.4 + 5.08 = 30.479999999999997 in JS float math. We must not
+    // emit that noise — KiCad accepts it but it looks broken.
+    const sum = 25.4 + 5.08;
+    const s = node("at", atom(sum), atom(0));
+    expect(serialize(s)).toBe("(at 30.48 0)");
+  });
+
+  it("rounds to 4 decimal places (KiCad sub-micron precision)", () => {
+    const s = node("x", atom(1.234567));
+    expect(serialize(s)).toBe("(x 1.2346)");
+  });
+
   it("handles an empty list (no children)", () => {
     const s = node("lib_symbols");
     expect(serialize(s)).toBe("(lib_symbols)");

@@ -167,4 +167,39 @@ describe("runExportJob integration", () => {
     const projectId = await seedGeneratedProject();
     await expect(runExportJob(projectId, "missing-job")).rejects.toThrow(/not found/i);
   });
+
+  it("garbage-collects old export zips to keep disk bounded", async () => {
+    const projectId = await seedGeneratedProject();
+
+    // Run 7 exports in sequence, with small delays so createdAt sort is
+    // deterministic (ISO string sort → millisecond precision).
+    const jobIds: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      await new Promise((r) => setTimeout(r, 3));
+      const { job } = await createExportJob({ projectId, format: "kicad" });
+      jobIds.push(job.id);
+      await runExportJob(projectId, job.id);
+    }
+
+    const stats = await Promise.all(
+      jobIds.map(async (id) => {
+        try {
+          await fs.stat(getExportFilePath(id));
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+
+    // Latest job is always kept. Of the earlier completed ones, only the
+    // 3 most recent survive. With 7 total: latest + 3 kept = 4 files;
+    // the 3 oldest have been GC'd.
+    const present = stats.filter(Boolean).length;
+    expect(present).toBeLessThanOrEqual(4);
+    // The very latest must exist
+    expect(stats[6]).toBe(true);
+    // The very oldest must be gone
+    expect(stats[0]).toBe(false);
+  });
 });

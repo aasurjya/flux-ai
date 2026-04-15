@@ -48,8 +48,12 @@ export function node(tag: string, ...children: (SExp | SExp[] | undefined | null
 
 function formatNumber(n: number): string {
   if (Number.isInteger(n)) return String(n);
-  // Trim trailing zeros but keep at least one decimal digit
-  return n.toString().replace(/(\.\d*?)0+$/, "$1");
+  // Round to 4 decimals to strip IEEE-754 noise (e.g. 25.4 + 5.08 =
+  // 30.479999999999997 → 30.48), then drop trailing zeros.
+  // 4 decimals = 0.1µm precision — well within KiCad's native accuracy.
+  const rounded = Number(n.toFixed(4));
+  if (Number.isInteger(rounded)) return String(rounded);
+  return rounded.toString().replace(/(\.\d*?)0+$/, "$1");
 }
 
 function escapeString(s: string): string {
