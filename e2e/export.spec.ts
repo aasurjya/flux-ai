@@ -27,6 +27,15 @@ test.describe("Export to KiCad flow", () => {
     const href = await downloadLink.getAttribute("href");
     expect(href).toMatch(/^\/api\/exports\/.+\/download$/);
 
+    // Fetch the zip and confirm firmware scaffold is in it
+    const response = await page.request.get(href!);
+    expect(response.status()).toBe(200);
+    const bytes = await response.body();
+    expect(bytes.length).toBeGreaterThan(500);
+    // zip local-file-header entries include each path as ASCII — search
+    // raw bytes for 'firmware/' which indicates MCU scaffold present
+    expect(bytes.toString("binary")).toContain("firmware/");
+
     expect(getErrors()).toEqual([]);
   });
 

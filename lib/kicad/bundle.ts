@@ -7,6 +7,7 @@ import { generateSchematic } from "./schematic-gen";
 import { generateNetlistXml } from "./netlist-gen";
 import { generateBomCsv } from "./bom-csv";
 import { generateKicadProject } from "./project-file";
+import { generateFirmwareEntries } from "./firmware-scaffold";
 
 /**
  * Convert a human-friendly project name into a filesystem-safe base name.
@@ -82,7 +83,11 @@ export async function buildKicadExport(input: BundleInput): Promise<BundleResult
     {
       name: `${slug}-bom.csv`,
       content: generateBomCsv(bom)
-    }
+    },
+    // Firmware scaffold is appended under firmware/ when a supported MCU
+    // family is detected in the BOM. Graceful no-op for passive-only
+    // designs (generateFirmwareEntries returns []).
+    ...generateFirmwareEntries(bom, architectureBlocks)
   ];
 
   const buffer = await zipEntries(entries);

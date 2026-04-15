@@ -9,6 +9,10 @@ const bom: BomItem[] = [
   { id: "u1", designator: "U1", name: "ESP32-S3", quantity: 1, package: "Module", status: "selected" },
   { id: "u2", designator: "U2", name: "LDO", quantity: 1, package: "SOT-223", status: "selected" }
 ];
+// Passive-only BOM for tests that need to assert "no firmware scaffold"
+const passiveBom: BomItem[] = [
+  { id: "r1", designator: "R1", name: "10k pull-up", quantity: 1, package: "0402", status: "selected" }
+];
 const blocks: CircuitBlock[] = [
   { id: "mcu", label: "MCU", kind: "processing", connections: ["3v3"] },
   { id: "3v3", label: "3.3V", kind: "power", connections: ["mcu"] }
@@ -25,7 +29,7 @@ describe("buildKicadExport", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("produces a buffer with filename-safe entry names (no spaces)", async () => {
+  it("produces a buffer with filename-safe entry names (no spaces) + firmware when MCU detected", async () => {
     const { buffer, entries } = await buildKicadExport({
       projectName: "Demo Board",
       bom,
@@ -33,14 +37,26 @@ describe("buildKicadExport", () => {
     });
     expect(buffer.length).toBeGreaterThan(500);
     const names = entries.map((e) => e.name).sort();
-    // Spaces in the project name become underscores in filenames
+    // 5 KiCad artifacts + 3 firmware entries (ESP32 → PlatformIO triplet)
     expect(names).toEqual([
       "Demo_Board-bom.csv",
       "Demo_Board-netlist.xml",
       "Demo_Board.kicad_pro",
       "Demo_Board.kicad_sch",
-      "Demo_Board.kicad_sym"
+      "Demo_Board.kicad_sym",
+      "firmware/README.md",
+      "firmware/platformio.ini",
+      "firmware/src/main.cpp"
     ]);
+  });
+
+  it("omits the firmware folder when the BOM has no MCU (passives only)", async () => {
+    const { entries } = await buildKicadExport({
+      projectName: "Passive",
+      bom: passiveBom,
+      architectureBlocks: blocks
+    });
+    expect(entries.some((e) => e.name.startsWith("firmware/"))).toBe(false);
   });
 
   it("strips Windows-unsafe chars from filenames but keeps them in the title_block", async () => {
@@ -89,7 +105,11 @@ describe("buildKicadExport", () => {
       architectureBlocks: blocks
     });
     const names = entries.map((e) => e.name);
-    expect(names.every((n) => n.startsWith("project"))).toBe(true);
+    // KiCad artifacts start with "project"; firmware entries are under
+    // firmware/ regardless of project name.
+    const kicadEntries = names.filter((n) => !n.startsWith("firmware/"));
+    expect(kicadEntries.length).toBeGreaterThan(0);
+    expect(kicadEntries.every((n) => n.startsWith("project"))).toBe(true);
   });
 
   it("throws on empty BOM (nothing useful to export)", async () => {
