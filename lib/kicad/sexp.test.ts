@@ -32,6 +32,11 @@ describe("sexp builder + serializer", () => {
     expect(serialize(s)).toBe('(note "He said \\"hi\\" \\\\ bye")');
   });
 
+  it("strips ASCII control chars to protect KiCad's C parser", () => {
+    const s = node("note", str("safe\x00null\x01soh\x1funit\x7fdel"));
+    expect(serialize(s)).toBe('(note "safenullsohunitdel")');
+  });
+
   it("formats integers without a decimal point and floats with one", () => {
     const s = node("xy", atom(10), atom(2.54));
     expect(serialize(s)).toBe("(xy 10 2.54)");

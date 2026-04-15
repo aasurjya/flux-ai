@@ -86,39 +86,40 @@ function buildBlockRefMap(
  * conventions where possible (VBUS_IN, VCC_3V3, GND, I2C_SDA, USB_DP).
  * Falls back to SIG_<fromKind>_<toKind> for anything else.
  *
- * Why this matters: a netlist with `<net name="/pwr-prot_usb-in">` is
- * noise to a hardware engineer. A netlist with `<net name="VBUS_IN">`
- * is actionable — they know which rail it is.
+ * Uses fixed-string `.includes()` checks on a lowercased label rather
+ * than user-facing regexes. LLM-emitted labels could otherwise trigger
+ * ReDoS on catastrophic backtracking patterns (low-severity but free
+ * to avoid).
  */
 function netNameFor(from: CircuitBlock, to: CircuitBlock): string {
   const kinds = new Set<CircuitBlockKind>([from.kind, to.kind]);
   const has = (k: CircuitBlockKind) => kinds.has(k);
 
+  // Fold label case once, then fixed-string matching only
+  const label = (from.label + " " + to.label).toLowerCase();
+  const includesAny = (...needles: string[]) => needles.some((n) => label.includes(n));
+
   // Power rail edges
   if (has("power") && (has("protection") || has("interface"))) {
-    // Upstream of regulator = VBUS
-    const label = from.label + to.label;
-    if (/usb[- ]?c/i.test(label)) return "VBUS_USB";
+    if (includesAny("usb-c", "usb c", "type-c", "type c")) return "VBUS_USB";
     return "VBUS_IN";
   }
   if (has("power") && has("processing")) {
-    const label = from.label + to.label;
-    if (/3[.v]?3|3v3/i.test(label)) return "VCC_3V3";
-    if (/5v|5\.0v/i.test(label)) return "VCC_5V";
-    if (/1[.v]?8/i.test(label)) return "VCC_1V8";
+    if (includesAny("3v3", "3.3v", "3.3 v")) return "VCC_3V3";
+    if (includesAny("5v", "5.0v", "5 v")) return "VCC_5V";
+    if (includesAny("1v8", "1.8v", "1.8 v")) return "VCC_1V8";
     return "VCC";
   }
   if (has("power") && has("sensor")) return "VCC_SENSOR";
   if (has("power") && has("analog")) return "VCC_ANA";
 
-  // Bus edges
-  const otherLabel = from.label + to.label;
-  if (/\bi2c\b|i²c/i.test(otherLabel)) return "I2C_BUS";
-  if (/\bspi\b/i.test(otherLabel)) return "SPI_BUS";
-  if (/\buart\b|\btx|\brx/i.test(otherLabel)) return "UART";
-  if (/\bcan\b/i.test(otherLabel)) return "CAN";
-  if (/\busb[- ]?[dp]|\bdp\b|\bdm\b/i.test(otherLabel)) return "USB_DP_DM";
-  if (/\bswd\b|\bdebug/i.test(otherLabel)) return "SWD";
+  // Bus edges — still fixed-string
+  if (includesAny("i2c", "i²c")) return "I2C_BUS";
+  if (includesAny("spi")) return "SPI_BUS";
+  if (includesAny("uart", "tx", "rx")) return "UART";
+  if (includesAny("can bus", "canbus")) return "CAN";
+  if (includesAny("usb dp", "usb dm", "usb d+", "usb d-")) return "USB_DP_DM";
+  if (includesAny("swd", "debug")) return "SWD";
 
   // Signal edge between specific block kinds
   const parts = [from.kind, to.kind].sort().join("_");

@@ -57,7 +57,14 @@ function formatNumber(n: number): string {
 }
 
 function escapeString(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  // Strip ASCII control chars (0x00-0x1f, 0x7f) BEFORE quoting. Null
+  // bytes terminate C strings early in KiCad's parser, which would
+  // corrupt downstream parsing. Other control chars are never valid in
+  // schematic text fields. Then escape \ and " for S-expression literals.
+  return s
+    .replace(/[\x00-\x1f\x7f]/g, "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
 }
 
 export interface SerializeOptions {

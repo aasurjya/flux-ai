@@ -286,10 +286,13 @@ export function runDesignRules(ctx: DesignRuleContext): DesignRuleIssue[] {
   for (const rule of ALL_RULES) {
     try {
       out.push(...rule(ctx));
-    } catch {
-      // A buggy rule must never break the pipeline. Skip silently and
-      // keep going — the cost of a missed warning is lower than the
-      // cost of crashing the generation.
+    } catch (err) {
+      // A buggy rule must never break the pipeline. But silently
+      // swallowing loses every diagnostic — log so regressions surface.
+      console.error(
+        `[design-rules] rule '${rule.name || "anonymous"}' threw, skipping:`,
+        err instanceof Error ? err.message : err
+      );
     }
   }
   return out;

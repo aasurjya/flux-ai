@@ -30,12 +30,16 @@ export async function GET(
     throw error;
   }
 
+  // Defence-in-depth: re-sanitize the filename independently of the
+  // regex above. If the regex is ever widened, we don't want a header
+  // injection via Content-Disposition. Only [a-z0-9_-] chars survive.
+  const safeFilename = `${jobId.replace(/[^a-zA-Z0-9_-]/g, "_")}.zip`;
   return new Response(new Uint8Array(buffer), {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
       "Content-Length": String(buffer.length),
-      "Content-Disposition": `attachment; filename="${jobId}.zip"`,
+      "Content-Disposition": `attachment; filename="${safeFilename}"`,
       "Cache-Control": "private, max-age=0, must-revalidate"
     }
   });
