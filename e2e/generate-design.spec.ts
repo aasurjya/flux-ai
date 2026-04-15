@@ -51,4 +51,23 @@ test.describe("Generate design flow", () => {
       page.getByRole("button", { name: /generate design/i })
     ).toHaveCount(0);
   });
+
+  test("state-coherence: drafts hide Export and Improve buttons until a design exists", async ({ page }) => {
+    // Fresh project, no generation yet
+    const unique = `Coherence ${Date.now()}`;
+    await page.goto("/projects/new");
+    await page.getByLabel("Project name").fill(unique);
+    await page.getByLabel("Design prompt").fill("anything");
+    await page.getByRole("button", { name: /continue to workspace/i }).click();
+
+    // Draft workspace: Generate visible, Export + Improve hidden (no design yet)
+    await expect(page.getByRole("button", { name: /generate design/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /export to kicad/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /improve design/i })).toHaveCount(0);
+
+    // After generate: Export + Improve should appear
+    await page.getByRole("button", { name: /generate design/i }).click();
+    await expect(page.getByRole("button", { name: /export to kicad/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /improve design/i })).toBeVisible();
+  });
 });

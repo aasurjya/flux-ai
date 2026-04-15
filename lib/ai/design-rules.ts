@@ -41,8 +41,21 @@ function architectureHas(blocks: CircuitBlock[], patterns: RegExp[]): boolean {
   );
 }
 
+function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/**
+ * Build a stable id from rule + title so a rule emitting multiple issues
+ * (e.g. DR-DECOUPLING emits one for missing 100nF and one for missing
+ * bulk) still has unique ids. Previously they collided under the rule
+ * name alone, which produced duplicate-key React warnings.
+ */
 function issue(partial: Omit<DesignRuleIssue, "id">): DesignRuleIssue {
-  return { id: `dr-${partial.rule.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, ...partial };
+  return {
+    id: `${slugify(partial.rule)}__${slugify(partial.title)}`,
+    ...partial
+  };
 }
 
 // ─── Rules ──────────────────────────────────────────────────────────────

@@ -178,12 +178,31 @@ describe("runDesignRules", () => {
         bom: [{ id: "1", designator: "U1", name: "x", quantity: 1, package: "x", status: "needs_review" }],
         constraints: []
       });
-      // Every issue has a rule id and an issue id
+      // Every issue has a rule id and an issue id; ids must be unique
+      const ids = new Set<string>();
       for (const issue of issues) {
         expect(issue.id).toMatch(/^dr-/);
         expect(issue.rule).toMatch(/^DR-/);
         expect(["info", "warning", "critical"]).toContain(issue.severity);
+        expect(ids.has(issue.id)).toBe(false);
+        ids.add(issue.id);
       }
+    });
+
+    it("a rule emitting multiple issues assigns unique ids", () => {
+      // DR-DECOUPLING emits two issues (100nF + bulk) when BOM has no caps
+      const issues = runDesignRules({
+        requirements: ["x"],
+        architectureBlocks: [mcuBlock, pwrBlock],
+        bom: [
+          { id: "u1", designator: "U1", name: "ESP32-S3", quantity: 1, package: "Module", status: "selected" }
+        ],
+        constraints: []
+      });
+      const decouplingIssues = issues.filter((i) => i.rule === "DR-DECOUPLING");
+      expect(decouplingIssues.length).toBeGreaterThanOrEqual(2);
+      const uniqueIds = new Set(decouplingIssues.map((i) => i.id));
+      expect(uniqueIds.size).toBe(decouplingIssues.length);
     });
   });
 });

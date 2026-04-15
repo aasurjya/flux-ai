@@ -98,20 +98,42 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
           <SectionHeading eyebrow="Workspace" title={currentProject.name} description={currentProject.prompt} />
           <div className="flex items-center gap-3">
             <ProjectStatusBadge status={currentProject.status} />
-            {currentProject.status === "draft" && (
-              <form action={generateAction} className="contents">
-                <input type="hidden" name="projectId" value={currentProject.id} />
-                <SubmitButton>Generate design</SubmitButton>
-              </form>
-            )}
-            <form action={exportAction} className="contents">
-              <input type="hidden" name="projectId" value={currentProject.id} />
-              <SubmitButton variant="outline">Export to KiCad</SubmitButton>
-            </form>
-            <form action={improveDesignAction} className="contents">
-              <input type="hidden" name="projectId" value={currentProject.id} />
-              <SubmitButton>Improve design</SubmitButton>
-            </form>
+            {(() => {
+              // State-derived affordances: only show the actions that make
+              // sense for the project's current state. Visual UX audit (see
+              // e2e/visual-audit.spec.ts screenshots) flagged these as
+              // confusing when always visible on drafts.
+              const hasDesign =
+                (currentProject.outputs.architectureBlocks?.length ?? 0) > 0;
+              const isDraft = currentProject.status === "draft";
+              const isGenerating = currentProject.status === "generating";
+              const showGenerate = isDraft || isGenerating;
+
+              return (
+                <>
+                  {showGenerate && (
+                    <form action={generateAction} className="contents">
+                      <input type="hidden" name="projectId" value={currentProject.id} />
+                      <SubmitButton>
+                        {isGenerating ? "Continue generation" : "Generate design"}
+                      </SubmitButton>
+                    </form>
+                  )}
+                  {hasDesign && (
+                    <>
+                      <form action={exportAction} className="contents">
+                        <input type="hidden" name="projectId" value={currentProject.id} />
+                        <SubmitButton variant="outline">Export to KiCad</SubmitButton>
+                      </form>
+                      <form action={improveDesignAction} className="contents">
+                        <input type="hidden" name="projectId" value={currentProject.id} />
+                        <SubmitButton>Improve design</SubmitButton>
+                      </form>
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
 
