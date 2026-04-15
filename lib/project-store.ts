@@ -391,10 +391,15 @@ interface GenerateProjectInput {
 /**
  * Picks the AI client used by the generation pipeline.
  *
- *   USE_REAL_AI=true  → real Anthropic client (requires ANTHROPIC_API_KEY)
- *   anything else     → deterministic stub (fast, offline, no API cost)
+ *   USE_REAL_AI=true  → real Anthropic client
+ *                       REQUIRES ANTHROPIC_API_KEY env var, or getAiClient()
+ *                       throws "AI client requires ANTHROPIC_API_KEY" at
+ *                       the first call (not at import time).
+ *   anything else     → deterministic stub (fast, offline, no API cost,
+ *                       no key required — ideal for CI/dev/demos).
  *
- * Tests can bypass this by passing client: ... into generateProject.
+ * Tests can bypass this by passing `client: ...` into generateProject
+ * or runImproveDesign directly.
  */
 function selectPipelineClient(): AiClient {
   if (process.env.USE_REAL_AI === "true") {

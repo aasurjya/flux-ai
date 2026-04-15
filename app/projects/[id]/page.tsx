@@ -180,7 +180,12 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
             <Card className="border-border/60 bg-card/60">
               <CardHeader>
                 <CardTitle>Architecture blocks</CardTitle>
-                <CardDescription>Block-level view of signal and power flow. Drag the graph horizontally if it extends off-screen.</CardDescription>
+                <CardDescription>
+                  {currentProject.outputs.architectureBlocks &&
+                  currentProject.outputs.architectureBlocks.length > 0
+                    ? "Block-level view of signal and power flow. Scroll the graph horizontally if it extends off-screen."
+                    : "First-pass planning placeholders. Run 'Generate design' to produce the real block graph."}
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm text-muted-foreground">
                 {currentProject.outputs.architectureBlocks && currentProject.outputs.architectureBlocks.length > 0 ? (
