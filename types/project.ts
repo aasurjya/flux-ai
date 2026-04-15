@@ -2,6 +2,22 @@ export type ProjectStatus = "draft" | "generating" | "review" | "ready_for_expor
 
 export type ExportJobStatus = "pending" | "running" | "completed" | "failed";
 
+export type CircuitBlockKind =
+  | "power"
+  | "processing"
+  | "sensor"
+  | "interface"
+  | "storage"
+  | "analog"
+  | "protection";
+
+export interface CircuitBlock {
+  id: string;
+  label: string;
+  kind: CircuitBlockKind;
+  connections: string[]; // ids of other blocks this one talks to
+}
+
 export interface ExportJob {
   id: string;
   projectId: string;
@@ -48,10 +64,13 @@ export interface ProjectSummary {
   outputs: {
     requirements: string[];
     architecture: string[];
+    architectureBlocks?: CircuitBlock[];
     bom: BomItem[];
     validations: ValidationIssue[];
     exportReady: boolean;
   };
   revisions: ProjectRevision[];
   exportJobs?: ExportJob[];
+  clarifyingQuestions?: string[];
+  clarifyingAnswers?: Record<string, string>;
 }
