@@ -17,19 +17,22 @@ async function createProjectAction(prevState: unknown, formData: FormData) {
     return { error: "Project name and design prompt are required" };
   }
 
+  let project;
   try {
-    const project = await createProject({
+    project = await createProject({
       name,
       prompt,
       constraints,
       preferredParts
     });
-
-    revalidatePath("/projects");
-    redirect(`/projects/${project.id}`);
   } catch {
     return { error: "Failed to create project. Please try again." };
   }
+
+  // redirect() throws a NEXT_REDIRECT error on purpose — must bubble out
+  // of the action, so it lives outside the try/catch above.
+  revalidatePath("/projects");
+  redirect(`/projects/${project.id}`);
 }
 
 export default function NewProjectPage() {
