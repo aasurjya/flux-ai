@@ -41,9 +41,7 @@ function architectureHas(blocks: CircuitBlock[], patterns: RegExp[]): boolean {
   );
 }
 
-function slugify(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
+import { slugify } from "@/lib/utils";
 
 /**
  * Build a stable id from rule + title so a rule emitting multiple issues
@@ -136,13 +134,19 @@ const i2cPullupRule: Rule = ({ architectureBlocks, bom }) => {
 
 /**
  * DR-ESD-PROTECTION: external connectors should have TVS / ESD protection.
- * We look for USB/Ethernet/antenna interfaces and require a TVS or ESD
- * part in the BOM to be present.
+ * We scan for user-exposed interfaces specifically — debug/programming
+ * headers are internal (engineer-facing, not user-touchable) so we do
+ * NOT flag them. Only USB, Ethernet, antenna, audio, DC jacks count.
  */
 const esdProtectionRule: Rule = ({ architectureBlocks, bom }) => {
   const hasExternalInterface = architectureBlocks.some((b) => {
     if (b.kind !== "interface") return false;
-    return /usb|ethernet|rj45|antenna|dc[- ]?jack|jack|header/i.test(b.label + b.id);
+    const text = (b.label + " " + b.id).toLowerCase();
+    // Debug/programming headers are NOT externally exposed in normal use.
+    if (/\b(swd|jtag|isp|debug|programming|uart\s*header|prog)\b/.test(text)) {
+      return false;
+    }
+    return /usb|ethernet|rj45|antenna|audio|jack|type[- ]?c|micro[- ]?b/.test(text);
   });
   if (!hasExternalInterface) return [];
 
@@ -150,7 +154,9 @@ const esdProtectionRule: Rule = ({ architectureBlocks, bom }) => {
     /\bESD\b/i,
     /\bTVS\b/i,
     /transient\s+voltage/i,
-    /\bESDA/i
+    /\bESDA/i,
+    /usblc6/i,
+    /pesd/i
   ]);
   if (hasEsd) return [];
 
@@ -160,7 +166,85 @@ const esdProtectionRule: Rule = ({ architectureBlocks, bom }) => {
       severity: "warning",
       title: "No ESD/TVS protection on external connectors",
       detail:
-        "Any externally accessible connection (USB, Ethernet, headers, antenna) can be destroyed by ESD from user touch or cable insertion. Add a TVS diode array (e.g. PESD3V3, USBLC6) near each external connector."
+        "Externally accessible connections (USB, Ethernet, antenna, audio) can be destroyed by ESD from user touch or cable insertion. Add a TVS diode array (e.g. PESD3V3, USBLC6, ESDA5V3L) near each external connector."
+    })
+  ];
+};
+
+/**
+ * DR-PROGRAMMING-HEADER: every design with a processing block should
+ * expose a programming/debug interface so the board can receive firmware.
+ * We look for a SWD/JTAG/ISP/UART-header block OR a USB-to-UART bridge
+ * IC in the BOM. Missing this is a bench-test killer.
+ */
+const programmingHeaderRule: Rule = ({ architectureBlocks, bom }) => {
+  const hasProcessing = architectureBlocks.some((b) => b.kind === "processing");
+  if (!hasProcessing) return [];
+
+  const archHasProgramming = architectureBlocks.some((b) => {
+    const text = (b.label + " " + b.id).toLowerCase();
+    return /\b(swd|jtag|isp|debug|programming|uart[- ]?header|prog)\b/.test(text);
+  });
+  const bomHasBridge = bomContains(bom, [
+    /\bCP210[0-9]/i,
+    /\bCH340/i,
+    /\bFT23[0-9]/i,
+    /\bCP21[0-9]/i,
+    /usb[- ]?to[- ]?uart/i,
+    /usb[- ]?serial/i
+  ]);
+  // ESP32 / ESP8266 / RP2040 have built-in USB bootloaders so don't need
+  // an external SWD header or USB-UART bridge to flash. Other MCUs
+  // (STM32, AVR, PIC, …) do need one.
+  const mcuSelfsProgrammable = bom.some((item) =>
+    /\besp32\b|\besp8266\b|\brp2040\b/i.test(item.name)
+  );
+  if (archHasProgramming || bomHasBridge || mcuSelfsProgrammable) return [];
+
+  return [
+    issue({
+      rule: "DR-PROGRAMMING-HEADER",
+      severity: "warning",
+      title: "No visible programming interface",
+      detail:
+        "Every processor block needs a way to load firmware. Add a SWD/JTAG/UART header block or a USB-to-UART bridge IC (e.g. CP2102, CH340) so the board can be flashed without removing the MCU."
+    })
+  ];
+};
+
+/**
+ * DR-RESET-NETWORK: MCUs that expose a RESET pin typically need a
+ * pull-up + small filter cap on that pin. Missing this causes random
+ * resets or failure to start. Only flagged when there's a processing
+ * block AND the BOM doesn't already contain reset-style components.
+ *
+ * This is a conservative check — many modern MCUs have internal reset
+ * circuits and strong recommendations in their datasheets, but we
+ * can't inspect package pinouts, so we only warn when there's zero
+ * reset-related BOM content.
+ */
+const resetNetworkRule: Rule = ({ architectureBlocks, bom }) => {
+  const hasProcessing = architectureBlocks.some((b) => b.kind === "processing");
+  if (!hasProcessing) return [];
+
+  // If the BOM mentions RST, reset, or MCLR explicitly, assume it's
+  // already designed in and don't flag.
+  const hasReset = bomContains(bom, [/\breset\b/i, /\brst\b/i, /\bMCLR/i]);
+  if (hasReset) return [];
+
+  // Also skip MCUs known to ship with robust internal reset (ESP32-S3 etc)
+  const mcuWithInternalReset = bom.some((item) =>
+    /esp32-s[23]|esp8266|rp2040/i.test(item.name)
+  );
+  if (mcuWithInternalReset) return [];
+
+  return [
+    issue({
+      rule: "DR-RESET-NETWORK",
+      severity: "info",
+      title: "No explicit reset network in BOM",
+      detail:
+        "If the selected MCU lacks a robust internal reset, add a pull-up (~10kΩ) on the RESET pin plus a small noise filter cap (e.g. 100nF) to prevent spurious resets. Verify against the datasheet."
     })
   ];
 };
@@ -271,6 +355,8 @@ const ALL_RULES: Rule[] = [
   decouplingCapsRule,
   i2cPullupRule,
   esdProtectionRule,
+  programmingHeaderRule,
+  resetNetworkRule,
   orphanBlockRule,
   powerBlockRule,
   needsReviewRatioRule,

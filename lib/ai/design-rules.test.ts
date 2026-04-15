@@ -101,6 +101,121 @@ describe("runDesignRules", () => {
       expect(issue).toBeDefined();
       expect(issue!.detail).toMatch(/TVS|ESD/i);
     });
+
+    it("does NOT flag internal debug headers as external (SWD, UART header, JTAG)", () => {
+      const issues = runDesignRules({
+        requirements: ["SWD debug"],
+        architectureBlocks: [
+          mcuBlock,
+          pwrBlock,
+          { id: "swd", label: "SWD header", kind: "interface", connections: ["mcu"] }
+        ],
+        bom: [
+          { id: "u1", designator: "U1", name: "STM32G0", quantity: 1, package: "QFN", status: "selected" },
+          { id: "j1", designator: "J1", name: "SWD 2x5 header", quantity: 1, package: "THT", status: "selected" }
+        ],
+        constraints: []
+      });
+      expect(findRule(issues, "DR-ESD-PROTECTION")).toBeUndefined();
+    });
+  });
+
+  describe("DR-PROGRAMMING-HEADER", () => {
+    it("flags a processing-block design with no programming interface", () => {
+      const issues = runDesignRules({
+        requirements: ["STM32 MCU"],
+        architectureBlocks: [mcuBlock, pwrBlock],
+        bom: [
+          { id: "u1", designator: "U1", name: "STM32G0", quantity: 1, package: "QFN", status: "selected" }
+        ],
+        constraints: []
+      });
+      const issue = findRule(issues, "DR-PROGRAMMING-HEADER");
+      expect(issue).toBeDefined();
+      expect(issue!.severity).toBe("warning");
+    });
+
+    it("does not flag when a SWD/UART header block exists in architecture", () => {
+      const issues = runDesignRules({
+        requirements: ["STM32 MCU"],
+        architectureBlocks: [
+          mcuBlock,
+          pwrBlock,
+          { id: "swd", label: "SWD programming header", kind: "interface", connections: ["mcu"] }
+        ],
+        bom: [
+          { id: "u1", designator: "U1", name: "STM32G0", quantity: 1, package: "QFN", status: "selected" }
+        ],
+        constraints: []
+      });
+      expect(findRule(issues, "DR-PROGRAMMING-HEADER")).toBeUndefined();
+    });
+
+    it("does not flag when the MCU is self-programmable (ESP32 / RP2040)", () => {
+      const issues = runDesignRules({
+        requirements: ["ESP32 board"],
+        architectureBlocks: [mcuBlock, pwrBlock],
+        bom: [
+          { id: "u1", designator: "U1", name: "ESP32-S3-WROOM-1", quantity: 1, package: "Module", status: "selected" }
+        ],
+        constraints: []
+      });
+      expect(findRule(issues, "DR-PROGRAMMING-HEADER")).toBeUndefined();
+    });
+
+    it("does not flag when a CP210x / CH340 USB-UART bridge is in BOM", () => {
+      const issues = runDesignRules({
+        requirements: ["USB-to-UART bridge"],
+        architectureBlocks: [mcuBlock, pwrBlock],
+        bom: [
+          { id: "u1", designator: "U1", name: "STM32G0", quantity: 1, package: "QFN", status: "selected" },
+          { id: "u2", designator: "U2", name: "CP2102 USB-to-UART bridge", quantity: 1, package: "QFN-28", status: "selected" }
+        ],
+        constraints: []
+      });
+      expect(findRule(issues, "DR-PROGRAMMING-HEADER")).toBeUndefined();
+    });
+  });
+
+  describe("DR-RESET-NETWORK", () => {
+    it("flags info-level when no reset components and MCU might need one", () => {
+      const issues = runDesignRules({
+        requirements: ["STM32 MCU"],
+        architectureBlocks: [mcuBlock, pwrBlock],
+        bom: [
+          { id: "u1", designator: "U1", name: "STM32G071 generic", quantity: 1, package: "QFN", status: "selected" }
+        ],
+        constraints: []
+      });
+      const issue = findRule(issues, "DR-RESET-NETWORK");
+      expect(issue).toBeDefined();
+      expect(issue!.severity).toBe("info");
+    });
+
+    it("does not flag ESP32-S3 / RP2040 (robust internal reset)", () => {
+      const issues = runDesignRules({
+        requirements: ["ESP32 board"],
+        architectureBlocks: [mcuBlock, pwrBlock],
+        bom: [
+          { id: "u1", designator: "U1", name: "ESP32-S3-WROOM-1", quantity: 1, package: "Module", status: "selected" }
+        ],
+        constraints: []
+      });
+      expect(findRule(issues, "DR-RESET-NETWORK")).toBeUndefined();
+    });
+
+    it("does not flag when a reset network component is in the BOM", () => {
+      const issues = runDesignRules({
+        requirements: ["STM32 MCU"],
+        architectureBlocks: [mcuBlock, pwrBlock],
+        bom: [
+          { id: "u1", designator: "U1", name: "STM32G0 generic", quantity: 1, package: "QFN", status: "selected" },
+          { id: "r1", designator: "R1", name: "RESET pull-up 10k", quantity: 1, package: "0402", status: "selected" }
+        ],
+        constraints: []
+      });
+      expect(findRule(issues, "DR-RESET-NETWORK")).toBeUndefined();
+    });
   });
 
   describe("DR-ORPHAN-BLOCK", () => {

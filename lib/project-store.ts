@@ -50,13 +50,7 @@ function splitListValue(value: string) {
     .filter(Boolean);
 }
 
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-}
+import { slugify } from "@/lib/utils";
 
 function isFileNotFoundError(error: unknown): error is { code: string } {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
