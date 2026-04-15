@@ -1,6 +1,85 @@
 import type { BomItem, CircuitBlock } from "@/types/project";
 import { atom, node, str, serialize, SExp } from "./sexp";
 import { mapToStdSymbol } from "./symbol-map";
+import { netNameFor, uniqueEdges, buildBlockRefMap } from "./netlist-gen";
+
+/**
+ * KiCad stdlib power symbol for a given semantic rail name. Matches
+ * symbols shipping in KiCad 8's `power:` library. Returns null for
+ * rails we can't map confidently — the generic placed lib_symbol still
+ * renders so nothing is lost.
+ */
+function powerLibIdFor(netName: string): string | null {
+  if (netName === "VCC_3V3") return "power:+3V3";
+  if (netName === "VCC_5V") return "power:+5V";
+  if (netName === "VCC_1V8") return "power:+1V8";
+  if (netName === "VCC") return "power:VCC";
+  if (netName === "VBUS_USB" || netName === "VBUS_IN") return "power:VBUS";
+  if (netName === "VCC_SENSOR" || netName === "VCC_ANA") return "power:+3V3"; // conservative
+  return null;
+}
+
+function hashSeed(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+/**
+ * KiCad global label at a given position. Labels with matching text
+ * connect by name — KiCad's ERC treats them as one net. This is how
+ * we "wire" without pin-level geometry.
+ */
+function globalLabelNode(name: string, x: number, y: number): SExp {
+  const uuidSuffix = Math.abs(hashSeed(`label-${name}-${x}-${y}`))
+    .toString()
+    .padStart(12, "0")
+    .slice(0, 12);
+  return node(
+    "global_label",
+    str(name),
+    node("shape", atom("input")),
+    node("at", atom(x), atom(y), atom(0)),
+    node(
+      "effects",
+      node("font", node("size", atom(1.27), atom(1.27))),
+      node("justify", atom("left"))
+    ),
+    node("uuid", str(`00000000-0000-4000-b000-${uuidSuffix}`))
+  );
+}
+
+/** KiCad stdlib power symbol placement (`power:+3V3` etc). */
+function powerSymbolNode(projectName: string, libId: string, x: number, y: number): SExp {
+  const uuidSuffix = Math.abs(hashSeed(`power-${libId}-${x}-${y}`))
+    .toString()
+    .padStart(12, "0")
+    .slice(0, 12);
+  return node(
+    "symbol",
+    node("lib_id", str(libId)),
+    node("at", atom(x), atom(y), atom(0)),
+    node("unit", atom(1)),
+    node("exclude_from_sim", atom("no")),
+    node("in_bom", atom("no")),
+    node("on_board", atom("yes")),
+    node("dnp", atom("no")),
+    node("uuid", str(`00000000-0000-4000-c000-${uuidSuffix}`)),
+    node(
+      "instances",
+      node(
+        "project",
+        str(projectName),
+        node(
+          "path",
+          str(`/${SHEET_UUID}`),
+          node("reference", str("#PWR")),
+          node("unit", atom(1))
+        )
+      )
+    )
+  );
+}
 
 const VERSION = 20231120;
 const GENERATOR = "flux_ai";
@@ -124,35 +203,90 @@ export function generateSchematic(input: GenerateSchematicInput): string {
     throw new Error("generateSchematic: bom must be non-empty");
   }
 
-  const { projectName, libName, bom } = input;
+  const { projectName, libName, bom, architectureBlocks } = input;
   const today = new Date().toISOString().slice(0, 10);
 
-  // Only inline lib_symbols for items that aren't covered by the KiCad
-  // standard library. Stdlib-referenced parts (passives, USB-C, etc.)
-  // load from KiCad's shipped libraries automatically.
   const customBom = bom.filter((item) => mapToStdSymbol(item) === null);
   const libSymbols = node(
     "lib_symbols",
     ...customBom.map((item) => libSymbolNode(libName, item))
   );
 
-  // Simple grid: 4 columns, 25.4mm spacing, starting at (25.4, 25.4)
   const COLS = 4;
   const SPACING = 25.4;
   const ORIGIN_X = 25.4;
   const ORIGIN_Y = 25.4;
+
+  // Track positions so net labels + power symbols can anchor near the
+  // corresponding placed BOM symbol.
+  const designatorPositions = new Map<string, { x: number; y: number }>();
   const placed = bom.map((item, i) => {
     const col = i % COLS;
     const row = Math.floor(i / COLS);
+    const x = ORIGIN_X + col * SPACING;
+    const y = ORIGIN_Y + row * SPACING;
+    designatorPositions.set(item.designator, { x, y });
     return placedSymbolNode(
       projectName,
       libName,
       item,
-      ORIGIN_X + col * SPACING,
-      ORIGIN_Y + row * SPACING,
+      x,
+      y,
       `${projectName}:${item.designator}`
     );
   });
+
+  // Net labels — for each unique architecture edge, emit a global_label
+  // at each endpoint's placed position. KiCad's ERC wires same-named
+  // labels into one net, so we don't need pin-level wire geometry.
+  // Reuses netNameFor + uniqueEdges + buildBlockRefMap from netlist-gen
+  // so the schematic and netlist XML use identical semantic names.
+  const blockById = new Map(architectureBlocks.map((b) => [b.id, b]));
+  const refByBlock =
+    architectureBlocks.length > 0
+      ? buildBlockRefMap(architectureBlocks, bom)
+      : new Map<string, string>();
+  const netLabels: SExp[] = [];
+  for (const edge of uniqueEdges(architectureBlocks)) {
+    const blockA = blockById.get(edge.a);
+    const blockB = blockById.get(edge.b);
+    if (!blockA || !blockB) continue;
+    const refA = refByBlock.get(edge.a);
+    const refB = refByBlock.get(edge.b);
+    if (!refA || !refB || refA === refB) continue;
+    const posA = designatorPositions.get(refA);
+    const posB = designatorPositions.get(refB);
+    if (!posA || !posB) continue;
+    const name = netNameFor(blockA, blockB);
+    // Offset labels above each symbol so they don't overlap the shape
+    netLabels.push(globalLabelNode(name, posA.x, posA.y - 8));
+    netLabels.push(globalLabelNode(name, posB.x, posB.y - 8));
+  }
+
+  // Power symbols — for every power-kind block whose connections we can
+  // name as a recognised rail, place a KiCad stdlib power symbol near
+  // its placed item. Gives the user the proper KiCad +3V3 / VBUS / GND
+  // visual instead of a generic rectangle.
+  const powerSymbols: SExp[] = [];
+  for (const block of architectureBlocks) {
+    if (block.kind !== "power") continue;
+    let railName: string | null = null;
+    for (const targetId of block.connections) {
+      const target = blockById.get(targetId);
+      if (!target) continue;
+      const candidate = netNameFor(block, target);
+      railName = candidate;
+      if (candidate.startsWith("VCC") || candidate.startsWith("VBUS")) break;
+    }
+    if (!railName) continue;
+    const libId = powerLibIdFor(railName);
+    if (!libId) continue;
+    const ref = refByBlock.get(block.id);
+    if (!ref) continue;
+    const pos = designatorPositions.get(ref);
+    if (!pos) continue;
+    powerSymbols.push(powerSymbolNode(projectName, libId, pos.x, pos.y - 15));
+  }
 
   const sheetInstances = node(
     "sheet_instances",
@@ -174,6 +308,8 @@ export function generateSchematic(input: GenerateSchematicInput): string {
     ),
     libSymbols,
     ...placed,
+    ...powerSymbols,
+    ...netLabels,
     sheetInstances
   );
 

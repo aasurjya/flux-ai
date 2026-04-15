@@ -5,6 +5,63 @@
 
 ---
 
+## Session 3 — 2026-04-16 (JARVIS Org bootstrap + Cycle 1)
+
+**Shift in operating model.** User pivoted the product toward a
+**self-improving agent organization**: roles (CEO, CTO, PM, Dev, QA,
+Security, Legal, Writer, …) that read / write shared markdown state
+and loop continuously. flux.ai remains the product; the org is the
+system building it.
+
+### Bootstrap
+- 3 new role agents: `ceo-founder`, `legal-compliance`, `head-of-product`
+  (added to `~/.claude/agents/`). Plus `socratic-challenger` and
+  `product-intel` from earlier in the session — now 14 non-blender
+  agents total = full virtual company.
+- `.jarvis-org/` state directory inside flux.ai:
+  `inbox/`, `outbox/`, and `state/` with README, roster, decisions,
+  backlog, KPIs, current-cycle, org-memory files seeded.
+- `/jarvis-cycle` slash command at `.claude/commands/jarvis-cycle.md`
+  — one user invocation runs the full org loop
+  (CEO → PM → CTO → Challenger → Dev → QA → Security → Writer → CEO).
+- `/loop 1h /jarvis-cycle` unlocks continuous mode; budget
+  guardrails in `JARVIS_BUDGET.json` cap cost/time.
+
+### Cycle 1 — Phase 1 shipped
+**Scope:** KiCad schematic wires itself via global labels + stdlib
+power symbols. Biggest user-visible credibility leak fixed.
+
+Changes:
+- `lib/kicad/netlist-gen.ts` — exported `netNameFor`, `uniqueEdges`,
+  `buildBlockRefMap` (R10 rule: shared helpers live in one file).
+- `lib/kicad/schematic-gen.ts` — added `globalLabelNode`,
+  `powerSymbolNode`, `powerLibIdFor`. For each unique architecture
+  edge, emit two `(global_label "VCC_3V3" …)` nodes — one at each
+  endpoint's placed-symbol position. KiCad's ERC wires same-named
+  labels into one net. For power-kind blocks, emit `power:+3V3` /
+  `power:+5V` / `power:VBUS` stdlib symbols nearby.
+- 5 new unit tests covering: label-per-edge, +3V3 for VCC_3V3,
+  +5V for VCC_5V, VBUS for USB-input power, no-power no-symbol,
+  no-edge no-label.
+
+### Gates (all green)
+- 198 / 198 unit tests (was 193)
+- 36 / 36 E2E
+- Build exit 0
+- Coverage thresholds hold
+
+### Durable rules added to org-memory
+- **R9** — KiCad artifact changes need manual open-test. Unit tests
+  confirm bytes; KiCad confirms semantics.
+- **R10** — Shared helpers between KiCad modules must be exported,
+  not duplicated.
+
+### Remaining backlog (head-of-product owned)
+Cycle 2 — Phase 2 (inline BOM editing). Same cycle structure.
+Phases 3-8 queued per the approved plan.
+
+---
+
 ## Session 2 — 2026-04-15 (continuous improvement)
 
 **Goal:** Continuous improvement loop following Session 1 hand-off.

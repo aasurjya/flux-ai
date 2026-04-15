@@ -34,9 +34,9 @@ function today(): string {
   return new Date().toISOString();
 }
 
-interface EdgeKey { a: string; b: string; key: string; }
+export interface EdgeKey { a: string; b: string; key: string; }
 
-function uniqueEdges(blocks: CircuitBlock[]): EdgeKey[] {
+export function uniqueEdges(blocks: CircuitBlock[]): EdgeKey[] {
   const seen = new Set<string>();
   const out: EdgeKey[] = [];
   for (const block of blocks) {
@@ -57,7 +57,7 @@ function uniqueEdges(blocks: CircuitBlock[]): EdgeKey[] {
  * in order, matching each block to the next unused item. Falls back to
  * cyclic indexing if there are more blocks than BOM items.
  */
-function buildBlockRefMap(
+export function buildBlockRefMap(
   blocks: CircuitBlock[],
   bom: BomItem[]
 ): Map<string, string> {
@@ -91,7 +91,7 @@ function buildBlockRefMap(
  * ReDoS on catastrophic backtracking patterns (low-severity but free
  * to avoid).
  */
-function netNameFor(from: CircuitBlock, to: CircuitBlock): string {
+export function netNameFor(from: CircuitBlock, to: CircuitBlock): string {
   const kinds = new Set<CircuitBlockKind>([from.kind, to.kind]);
   const has = (k: CircuitBlockKind) => kinds.has(k);
 
