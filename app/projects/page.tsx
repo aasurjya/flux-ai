@@ -1,13 +1,28 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { Plus } from "lucide-react";
 import { ProjectCard } from "@/components/project-card";
 import { SectionHeading } from "@/components/section-heading";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
-import { getProjects } from "@/lib/project-store";
+import { getProjects, deleteProject } from "@/lib/project-store";
+import { mockProjects } from "@/lib/mock-data";
+
+async function deleteProjectAction(formData: FormData) {
+  "use server";
+  const projectId = String(formData.get("projectId") ?? "");
+  if (!projectId) throw new Error("Project ID is required");
+  // Refuse to delete seeded mock projects — they're examples, not user data
+  if (mockProjects.some((m) => m.id === projectId)) {
+    throw new Error("Cannot delete the sample project");
+  }
+  await deleteProject(projectId);
+  revalidatePath("/projects");
+}
 
 export default async function ProjectsPage() {
   const projects = await getProjects();
+  const mockIds = new Set(mockProjects.map((m) => m.id));
 
   return (
     <div className="container py-16">
@@ -31,7 +46,12 @@ export default async function ProjectsPage() {
           </div>
         ) : (
           projects.map((project) => (
-            <ProjectCard key={project.id} project={project} />
+            <ProjectCard
+              key={project.id}
+              project={project}
+              // Mock seeded projects aren't deletable — they're examples
+              deleteAction={mockIds.has(project.id) ? undefined : deleteProjectAction}
+            />
           ))
         )}
       </div>

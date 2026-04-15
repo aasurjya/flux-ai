@@ -270,7 +270,11 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
               <div className="space-y-4">
                 <h3 className="font-medium text-foreground">Export jobs</h3>
                 {currentProject.exportJobs.map((job) => (
-                  <ExportJobCard key={job.id} job={job} />
+                  <ExportJobCard
+                    key={job.id}
+                    job={job}
+                    retryAction={job.status === "failed" ? exportAction : undefined}
+                  />
                 ))}
               </div>
             )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Loader2, CheckCircle, AlertCircle, FileArchive } from "lucide-react";
+import { Download, Loader2, CheckCircle, AlertCircle, FileArchive, RotateCcw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,9 +8,11 @@ import type { ExportJob } from "@/types/project";
 
 interface ExportJobCardProps {
   job: ExportJob;
+  /** Server action fired when the user clicks Retry on a failed job. */
+  retryAction?: (formData: FormData) => void | Promise<void>;
 }
 
-export function ExportJobCard({ job }: ExportJobCardProps) {
+export function ExportJobCard({ job, retryAction }: ExportJobCardProps) {
   const statusConfig = {
     pending: { icon: Loader2, label: "Pending", variant: "secondary" as const, spin: false, color: "text-muted-foreground" },
     running: { icon: Loader2, label: "Running", variant: "warning" as const, spin: true, color: "text-amber-400" },
@@ -56,12 +58,25 @@ export function ExportJobCard({ job }: ExportJobCardProps) {
           </Button>
         )}
 
-        {job.status === "failed" && job.error && (
-          <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              {job.error}
-            </div>
+        {job.status === "failed" && (
+          <div className="space-y-3">
+            {job.error && (
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="break-words">{job.error}</span>
+                </div>
+              </div>
+            )}
+            {retryAction && (
+              <form action={retryAction} className="contents">
+                <input type="hidden" name="projectId" value={job.projectId} />
+                <Button type="submit" variant="outline" className="w-full">
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Retry export
+                </Button>
+              </form>
+            )}
           </div>
         )}
       </CardContent>

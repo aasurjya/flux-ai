@@ -3,17 +3,34 @@ import { ArrowRight, Layers, ShieldAlert } from "lucide-react";
 import { ProjectStatusBadge } from "@/components/project-status-badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProjectSummary } from "@/types/project";
+import { formatRelative } from "@/lib/format-relative";
+import { DeleteProjectForm } from "@/components/delete-project-form";
 
-export function ProjectCard({ project }: { project: ProjectSummary }) {
+interface ProjectCardProps {
+  project: ProjectSummary;
+  /** When provided, renders a delete button wired to this server action. */
+  deleteAction?: (formData: FormData) => void | Promise<void>;
+}
+
+export function ProjectCard({ project, deleteAction }: ProjectCardProps) {
   return (
     <Card className="h-full border-border/60 bg-card/60">
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-2">
-            <CardTitle>{project.name}</CardTitle>
-            <CardDescription>{project.prompt}</CardDescription>
+            <CardTitle className="break-words">{project.name}</CardTitle>
+            <CardDescription className="break-words">{project.prompt}</CardDescription>
           </div>
-          <ProjectStatusBadge status={project.status} />
+          <div className="flex items-start gap-1">
+            <ProjectStatusBadge status={project.status} />
+            {deleteAction && (
+              <DeleteProjectForm
+                projectId={project.id}
+                projectName={project.name}
+                action={deleteAction}
+              />
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -42,7 +59,7 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
         </div>
       </CardContent>
       <CardFooter className="justify-between">
-        <p className="text-sm text-muted-foreground">{project.updatedAt}</p>
+        <p className="text-sm text-muted-foreground">Updated {formatRelative(project.updatedAt)}</p>
         <Link href={`/projects/${project.id}`} className="inline-flex items-center gap-2 text-sm font-medium text-primary transition hover:opacity-80">
           Open workspace
           <ArrowRight className="h-4 w-4" />
