@@ -7,6 +7,7 @@ import { getAiClient } from "@/lib/ai/client";
 import { createStubAiClient } from "@/lib/ai/stub-client";
 import { runGenerationPipeline } from "@/lib/ai/pipeline";
 import { architectureSummary } from "@/lib/ai/generate-architecture";
+import { buildKicadExport } from "@/lib/kicad/bundle";
 
 interface CreateProjectInput {
   name: string;
@@ -369,10 +370,22 @@ export async function getExportJob(projectId: string, jobId: string) {
   return job ?? null;
 }
 
+function getExportsDir(): string {
+  return process.env.FLUX_EXPORTS_DIR ?? path.join(process.cwd(), "data", "exports");
+}
+
+export function getExportFilePath(jobId: string): string {
+  return path.join(getExportsDir(), `${jobId}.zip`);
+}
+
+/**
+ * Run a KiCad export job synchronously: generate the bundle, persist
+ * the zip to disk, and mark the job completed. Failures are captured on
+ * the job record so the UI can surface them without crashing the page.
+ */
 export async function runExportJob(projectId: string, jobId: string) {
   const storedProjects = await readStoredProjects();
   const projectIndex = storedProjects.findIndex((p) => p.id === projectId);
-
   if (projectIndex === -1) {
     throw new Error(`Project not found: ${projectId}`);
   }
@@ -380,71 +393,82 @@ export async function runExportJob(projectId: string, jobId: string) {
   const project = storedProjects[projectIndex];
   const jobs = project.exportJobs ?? [];
   const jobIndex = jobs.findIndex((j) => j.id === jobId);
-
   if (jobIndex === -1) {
     throw new Error(`Export job not found: ${jobId}`);
   }
 
-  const job = jobs[jobIndex];
-
-  // Simulate export job progression
-  const updatedJob = {
-    ...job,
-    status: "running" as const,
-    logs: [
-      ...job.logs,
-      "Validating project outputs...",
-      "Generating KiCad schematic symbols...",
-      "Creating PCB footprint assignments...",
-      "Building netlist connections...",
-      "Packaging output files..."
-    ]
-  };
-
-  const updatedJobs = [...jobs];
-  updatedJobs[jobIndex] = updatedJob;
-
-  const updatedProject = {
-    ...project,
-    exportJobs: updatedJobs
-  };
-
-  storedProjects[projectIndex] = updatedProject;
+  // Mark running
+  const runningLogs = [...jobs[jobIndex].logs, "Validating project outputs..."];
+  const runningJob = { ...jobs[jobIndex], status: "running" as const, logs: runningLogs };
+  const runningJobs = [...jobs];
+  runningJobs[jobIndex] = runningJob;
+  storedProjects[projectIndex] = { ...project, exportJobs: runningJobs };
   await writeStoredProjects(storedProjects);
 
-  // Simulate completion after a delay (in real implementation, this would be a background job)
-  setTimeout(async () => {
-    const finalStoredProjects = await readStoredProjects();
-    const finalProjectIndex = finalStoredProjects.findIndex((p) => p.id === projectId);
-    if (finalProjectIndex === -1) return;
+  try {
+    const architectureBlocks = project.outputs.architectureBlocks;
+    if (!architectureBlocks || architectureBlocks.length === 0) {
+      throw new Error(
+        "Cannot export: project has no architecture blocks. Run 'Generate design' first."
+      );
+    }
+    if (project.outputs.bom.length === 0) {
+      throw new Error("Cannot export: BOM is empty.");
+    }
 
-    const finalProject = finalStoredProjects[finalProjectIndex];
-    const finalJobs = finalProject.exportJobs ?? [];
-    const finalJobIndex = finalJobs.findIndex((j) => j.id === jobId);
-    if (finalJobIndex === -1) return;
+    const outPath = getExportFilePath(jobId);
+    await buildKicadExport({
+      projectName: project.name,
+      bom: project.outputs.bom,
+      architectureBlocks,
+      outPath
+    });
 
-    const finalJob = finalJobs[finalJobIndex];
+    const latestStored = await readStoredProjects();
+    const latestIndex = latestStored.findIndex((p) => p.id === projectId);
+    const latestProject = latestStored[latestIndex];
+    const latestJobs = latestProject.exportJobs ?? [];
+    const latestJobIndex = latestJobs.findIndex((j) => j.id === jobId);
+    const latestJob = latestJobs[latestJobIndex];
     const completedJob = {
-      ...finalJob,
+      ...latestJob,
       status: "completed" as const,
       completedAt: new Date().toISOString(),
       downloadUrl: `/api/exports/${jobId}/download`,
-      logs: [...finalJob.logs, "Export completed successfully!"]
+      logs: [
+        ...latestJob.logs,
+        `Generated ${project.name}.kicad_pro, .kicad_sch, .kicad_sym`,
+        `Generated ${project.name}-netlist.xml and ${project.name}-bom.csv`,
+        "Packaged into zip and persisted to exports directory"
+      ]
     };
-
-    const finalUpdatedJobs = [...finalJobs];
-    finalUpdatedJobs[finalJobIndex] = completedJob;
-
-    finalStoredProjects[finalProjectIndex] = {
-      ...finalProject,
+    latestJobs[latestJobIndex] = completedJob;
+    latestStored[latestIndex] = {
+      ...latestProject,
       status: "exported" as const,
-      exportJobs: finalUpdatedJobs
+      exportJobs: latestJobs
     };
-
-    await writeStoredProjects(finalStoredProjects);
-  }, 2000);
-
-  return updatedJob;
+    await writeStoredProjects(latestStored);
+    return completedJob;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const latestStored = await readStoredProjects();
+    const latestIndex = latestStored.findIndex((p) => p.id === projectId);
+    const latestProject = latestStored[latestIndex];
+    const latestJobs = latestProject.exportJobs ?? [];
+    const latestJobIndex = latestJobs.findIndex((j) => j.id === jobId);
+    const latestJob = latestJobs[latestJobIndex];
+    const failedJob = {
+      ...latestJob,
+      status: "failed" as const,
+      error: message,
+      logs: [...latestJob.logs, `Export failed: ${message}`]
+    };
+    latestJobs[latestJobIndex] = failedJob;
+    latestStored[latestIndex] = { ...latestProject, exportJobs: latestJobs };
+    await writeStoredProjects(latestStored);
+    return failedJob;
+  }
 }
 
 export { splitListValue, slugify };
