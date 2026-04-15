@@ -9,6 +9,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { AiWorkflowStages } from "@/components/ai-workflow-stages";
 import { ExportJobCard } from "@/components/export-job-card";
 import { getProjectById, addRevision, generateProject, createExportJob, runExportJob } from "@/lib/project-store";
+import { AnswerQuestionsForm } from "./answer-questions-form";
 
 async function improveDesignAction(formData: FormData) {
   "use server";
@@ -41,6 +42,28 @@ async function generateAction(formData: FormData) {
   }
 
   await generateProject({ projectId });
+  revalidatePath(`/projects/${projectId}`);
+}
+
+async function answerQuestionsAction(formData: FormData) {
+  "use server";
+
+  const projectId = String(formData.get("projectId") ?? "");
+  if (!projectId) {
+    throw new Error("Project ID is required");
+  }
+
+  // Collect question/answer pairs from the form
+  const answers: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith("question-")) continue;
+    const index = key.slice("question-".length);
+    const answer = String(formData.get(`answer-${index}`) ?? "").trim();
+    if (!answer) continue;
+    answers[String(value)] = answer;
+  }
+
+  await generateProject({ projectId, clarifyingAnswers: answers });
   revalidatePath(`/projects/${projectId}`);
 }
 
@@ -98,6 +121,14 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
             </Badge>
           ))}
         </div>
+
+        {currentProject.clarifyingQuestions && currentProject.clarifyingQuestions.length > 0 && (
+          <AnswerQuestionsForm
+            projectId={currentProject.id}
+            questions={currentProject.clarifyingQuestions}
+            action={answerQuestionsAction}
+          />
+        )}
 
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-6">

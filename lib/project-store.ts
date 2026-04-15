@@ -2,6 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { mockProjects } from "@/lib/mock-data";
 import { ProjectSummary } from "@/types/project";
+import type { AiClient } from "@/lib/ai/client";
+import { getAiClient } from "@/lib/ai/client";
+import { createStubAiClient } from "@/lib/ai/stub-client";
+import { runGenerationPipeline } from "@/lib/ai/pipeline";
+import { architectureSummary } from "@/lib/ai/generate-architecture";
 
 interface CreateProjectInput {
   name: string;
@@ -10,7 +15,9 @@ interface CreateProjectInput {
   preferredParts: string[];
 }
 
-const projectsFilePath = path.join(process.cwd(), "data", "projects.json");
+function getProjectsFilePath(): string {
+  return process.env.FLUX_PROJECTS_FILE ?? path.join(process.cwd(), "data", "projects.json");
+}
 
 function splitListValue(value: string) {
   return value
@@ -33,7 +40,7 @@ function isFileNotFoundError(error: unknown): error is { code: string } {
 
 async function readStoredProjects() {
   try {
-    const fileContents = await fs.readFile(projectsFilePath, "utf8");
+    const fileContents = await fs.readFile(getProjectsFilePath(), "utf8");
     const parsedProjects = JSON.parse(fileContents) as ProjectSummary[];
 
     return Array.isArray(parsedProjects) ? parsedProjects : [];
@@ -47,8 +54,9 @@ async function readStoredProjects() {
 }
 
 async function writeStoredProjects(projects: ProjectSummary[]) {
-  await fs.mkdir(path.dirname(projectsFilePath), { recursive: true });
-  await fs.writeFile(projectsFilePath, JSON.stringify(projects, null, 2), "utf8");
+  const filePath = getProjectsFilePath();
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(projects, null, 2), "utf8");
 }
 
 function buildStarterBom(preferredParts: string[]): ProjectSummary["outputs"]["bom"] {
@@ -216,100 +224,100 @@ export async function addRevision(input: AddRevisionInput) {
 
 interface GenerateProjectInput {
   projectId: string;
+  clarifyingAnswers?: Record<string, string>;
+  client?: AiClient; // injected in tests
 }
 
-export async function generateProject({ projectId }: GenerateProjectInput) {
+/**
+ * Picks the AI client used by the generation pipeline.
+ *
+ *   USE_REAL_AI=true  → real Anthropic client (requires ANTHROPIC_API_KEY)
+ *   anything else     → deterministic stub (fast, offline, no API cost)
+ *
+ * Tests can bypass this by passing client: ... into generateProject.
+ */
+function selectPipelineClient(): AiClient {
+  if (process.env.USE_REAL_AI === "true") {
+    return getAiClient();
+  }
+  return createStubAiClient();
+}
+
+export async function generateProject({
+  projectId,
+  clarifyingAnswers,
+  client
+}: GenerateProjectInput): Promise<ProjectSummary> {
   const storedProjects = await readStoredProjects();
   const projectIndex = storedProjects.findIndex((p) => p.id === projectId);
-
   if (projectIndex === -1) {
     throw new Error(`Project not found: ${projectId}`);
   }
-
   const project = storedProjects[projectIndex];
 
-  // AI Workflow: Generate structured outputs based on prompt and constraints
-  const generatedRequirements = [
-    `Extracted objective from prompt: ${project.prompt}`,
-    `Design must honor constraints: ${project.constraints.join(", ")}`,
-    "Power architecture requires analysis for regulator selection and efficiency",
-    "Signal integrity considerations for high-speed interfaces if applicable",
-    "Manufacturability review for selected package types and assembly"
-  ];
+  const ai = client ?? selectPipelineClient();
 
-  const generatedArchitecture = [
-    "Power Entry: Input protection, filtering, and primary regulation stage",
-    "Processing Core: Microcontroller/SoC with required peripherals and memory",
-    "Interface Layer: Communication ports, connectors, and level shifters",
-    "Sensor/Actuator Integration: Analog frontends, digital sensors, driver circuits"
-  ];
+  // Merge prior answers (from persisted state) with the ones passed in now.
+  const effectiveAnswers = clarifyingAnswers ?? project.clarifyingAnswers;
 
-  const generatedBom: ProjectSummary["outputs"]["bom"] = project.constraints.includes("Low-cost BOM")
-    ? [
-        { id: "bom-1", designator: "U1", name: "Cost-optimized MCU", quantity: 1, package: "QFN-32", status: "needs_review" },
-        { id: "bom-2", designator: "U2", name: "Integrated PMIC", quantity: 1, package: "QFN-16", status: "needs_review" },
-        { id: "bom-3", designator: "J1", name: "USB-C Connector", quantity: 1, package: "SMD", status: "selected" }
-      ]
-    : [
-        { id: "bom-1", designator: "U1", name: "High-performance MCU", quantity: 1, package: "LQFP-64", status: "needs_review" },
-        { id: "bom-2", designator: "U2", name: "Discrete PMIC", quantity: 1, package: "QFN-20", status: "needs_review" },
-        { id: "bom-3", designator: "J1", name: "USB-C Connector", quantity: 1, package: "SMD", status: "selected" }
-      ];
+  const result = await runGenerationPipeline(ai, {
+    prompt: project.prompt,
+    constraints: project.constraints,
+    preferredParts: [], // TODO wire through from create form when needed
+    clarifyingAnswers: effectiveAnswers
+  });
 
-  const generatedValidations: ProjectSummary["outputs"]["validations"] = [
-    {
-      id: "val-1",
-      severity: "warning",
-      title: "Verify power budget calculations",
-      detail: "Confirm total current draw matches regulator capacity and thermal limits."
-    },
-    {
-      id: "val-2",
-      severity: "info",
-      title: "Review footprint compatibility",
-      detail: "Ensure all selected packages are compatible with intended PCB process capabilities."
-    },
-    {
-      id: "val-3",
-      severity: project.constraints.includes("2-layer board") ? "warning" : "info",
-      title: "Layer count routing check",
-      detail: project.constraints.includes("2-layer board")
-        ? "High-speed signals may require careful routing on 2-layer design."
-        : "4+ layer design provides good signal integrity and power distribution."
-    }
-  ];
+  if (result.kind === "paused") {
+    // Persist the pause state so the workspace can show the form.
+    const paused: ProjectSummary = {
+      ...project,
+      status: "generating",
+      updatedAt: "Updated just now",
+      outputs: {
+        ...project.outputs,
+        requirements: result.requirements
+      },
+      clarifyingQuestions: result.questions,
+      clarifyingAnswers: undefined
+    };
+    storedProjects[projectIndex] = paused;
+    await writeStoredProjects(storedProjects);
+    return paused;
+  }
 
   const generationRevision = {
     id: `rev-${project.revisions.length + 1}`,
-    title: "AI Generation: Complete workflow",
-    description: "Ran structured AI pipeline through requirements, architecture, BOM, and validation stages.",
+    title: "AI generation",
+    description: "Ran prompt → requirements → architecture → BOM → validation through the AI pipeline.",
     createdAt: "Just now",
     changes: [
-      "Generated structured requirements from design prompt",
-      "Created system architecture with block-level organization",
-      "Selected initial BOM based on constraints and cost targets",
-      "Ran validation checks for power, signal integrity, and manufacturability"
+      `Produced ${result.requirements.length} requirements`,
+      `Generated ${result.architectureBlocks.length}-block architecture`,
+      `Selected ${result.bom.length} BOM items`,
+      `Flagged ${result.validations.length} validation issues`
     ]
   };
 
-  const updatedProject: ProjectSummary = {
+  const updated: ProjectSummary = {
     ...project,
     status: "review",
     updatedAt: "Updated just now",
     outputs: {
-      requirements: generatedRequirements,
-      architecture: generatedArchitecture,
-      bom: generatedBom,
-      validations: generatedValidations,
+      requirements: result.requirements,
+      architecture: architectureSummary(result.architectureBlocks),
+      architectureBlocks: result.architectureBlocks,
+      bom: result.bom,
+      validations: result.validations,
       exportReady: false
     },
+    clarifyingQuestions: undefined,
+    clarifyingAnswers: effectiveAnswers,
     revisions: [generationRevision, ...project.revisions]
   };
 
-  storedProjects[projectIndex] = updatedProject;
+  storedProjects[projectIndex] = updated;
   await writeStoredProjects(storedProjects);
-
-  return updatedProject;
+  return updated;
 }
 
 interface CreateExportJobInput {
