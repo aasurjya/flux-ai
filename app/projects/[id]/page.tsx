@@ -9,6 +9,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { AiWorkflowStages } from "@/components/ai-workflow-stages";
 import { CircuitGraph } from "@/components/circuit-graph";
 import { ExportJobCard } from "@/components/export-job-card";
+import { RevisionCompare } from "@/components/revision-compare";
 import { formatRelative } from "@/lib/format-relative";
 import { getProjectById, generateProject, createExportJob, runExportJob, runImproveDesign } from "@/lib/project-store";
 import { AnswerQuestionsForm } from "./answer-questions-form";
@@ -77,8 +78,15 @@ async function exportAction(formData: FormData) {
   revalidatePath(`/projects/${projectId}`);
 }
 
-export default async function ProjectWorkspacePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ProjectWorkspacePage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ compareA?: string; compareB?: string }>;
+}) {
   const { id } = await params;
+  const search = await searchParams;
   const project = await getProjectById(id);
 
   if (!project) {
@@ -86,6 +94,26 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
   }
 
   const currentProject = project;
+
+  // Resolve the compare selection (if any) — both IDs must exist AND
+  // both revisions must have snapshots, otherwise fall through silently.
+  const revById = new Map(currentProject.revisions.map((r) => [r.id, r]));
+  const compareA = search.compareA ? revById.get(search.compareA) : undefined;
+  const compareB = search.compareB ? revById.get(search.compareB) : undefined;
+  const canCompare = Boolean(compareA && compareB && compareA.id !== compareB.id);
+  // Order the pair: older first. `revisions` is prepended newest-first,
+  // so lower index = newer. We want older → newer in the diff direction.
+  let comparePair: { older: typeof compareA; newer: typeof compareA } | null = null;
+  if (canCompare && compareA && compareB) {
+    const idxA = currentProject.revisions.findIndex((r) => r.id === compareA.id);
+    const idxB = currentProject.revisions.findIndex((r) => r.id === compareB.id);
+    // Higher index = older (revisions are prepended newest-first)
+    if (idxA > idxB) {
+      comparePair = { older: compareA, newer: compareB };
+    } else {
+      comparePair = { older: compareB, newer: compareA };
+    }
+  }
 
   return (
     <div className="container py-16">
@@ -214,7 +242,7 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
                         <h3 className="break-words font-medium text-foreground">{revision.title}</h3>
                         <p className="break-words text-sm text-muted-foreground">{revision.description}</p>
                       </div>
-                      <p className="shrink-0 text-xs text-muted-foreground">
+                      <p className="shrink-0 text-xs text-muted-foreground" suppressHydrationWarning>
                         {formatRelative(revision.createdAt)}
                       </p>
                     </div>
@@ -242,6 +270,65 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
                 ))}
               </CardContent>
             </Card>
+
+            {/* Compare panel — available once 2+ revisions exist with snapshots */}
+            {currentProject.revisions.length >= 2 && (
+              <Card className="border-border/60 bg-card/60">
+                <CardHeader>
+                  <CardTitle className="text-base">Compare revisions</CardTitle>
+                  <CardDescription>
+                    Pick two revisions to see the structured BOM, validation, and
+                    architecture diff between them.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <form method="GET" className="flex flex-wrap items-end gap-3">
+                    <div className="flex-1 min-w-[150px] space-y-1">
+                      <label htmlFor="compareA" className="text-xs font-medium text-muted-foreground">
+                        Revision A
+                      </label>
+                      <select
+                        id="compareA"
+                        name="compareA"
+                        defaultValue={search.compareA ?? currentProject.revisions[1]?.id ?? ""}
+                        className="w-full rounded-md border border-border bg-background/50 px-3 py-2 text-sm"
+                      >
+                        {currentProject.revisions.map((r) => (
+                          <option key={r.id} value={r.id} disabled={!r.snapshot}>
+                            {r.title}
+                            {!r.snapshot ? " (no snapshot)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[150px] space-y-1">
+                      <label htmlFor="compareB" className="text-xs font-medium text-muted-foreground">
+                        Revision B
+                      </label>
+                      <select
+                        id="compareB"
+                        name="compareB"
+                        defaultValue={search.compareB ?? currentProject.revisions[0]?.id ?? ""}
+                        className="w-full rounded-md border border-border bg-background/50 px-3 py-2 text-sm"
+                      >
+                        {currentProject.revisions.map((r) => (
+                          <option key={r.id} value={r.id} disabled={!r.snapshot}>
+                            {r.title}
+                            {!r.snapshot ? " (no snapshot)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <Button type="submit" variant="outline" size="sm">
+                      Compare
+                    </Button>
+                  </form>
+                  {comparePair && (
+                    <RevisionCompare older={comparePair.older!} newer={comparePair.newer!} />
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="space-y-6">

@@ -59,7 +59,9 @@ export function ProjectCard({ project, deleteAction }: ProjectCardProps) {
         </div>
       </CardContent>
       <CardFooter className="justify-between">
-        <p className="text-sm text-muted-foreground">Updated {formatRelative(project.updatedAt)}</p>
+        <p className="text-sm text-muted-foreground" suppressHydrationWarning>
+          Updated {formatRelative(project.updatedAt)}
+        </p>
         <div className="flex items-center gap-4">
           <Link
             href={`/api/projects/${project.id}/export-json`}

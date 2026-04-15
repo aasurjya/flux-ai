@@ -46,12 +46,27 @@ export interface BomItem {
   status: "selected" | "alternate" | "needs_review";
 }
 
+/**
+ * Lightweight snapshot of the structured outputs at the moment this
+ * revision was created. Used by the compare view to compute a concrete
+ * BOM/validation/architecture delta between any two revisions.
+ *
+ * Optional — older revisions pre-date this field and will simply render
+ * as "snapshot unavailable" in the compare UI. Forward-only migration.
+ */
+export interface RevisionSnapshot {
+  bom: BomItem[];
+  validations: ValidationIssue[];
+  architectureBlocks?: CircuitBlock[];
+}
+
 export interface ProjectRevision {
   id: string;
   title: string;
   description: string;
   createdAt: string;
   changes: string[];
+  snapshot?: RevisionSnapshot;
 }
 
 export interface ProjectSummary {

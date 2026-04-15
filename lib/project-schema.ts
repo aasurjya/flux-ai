@@ -44,14 +44,6 @@ const BomItemSchema = z.object({
   status: z.enum(["selected", "alternate", "needs_review"])
 });
 
-const ProjectRevisionSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  description: z.string(),
-  createdAt: z.string().min(1),
-  changes: z.array(z.string())
-});
-
 const CircuitBlockSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
@@ -65,6 +57,21 @@ const CircuitBlockSchema = z.object({
     "protection"
   ]),
   connections: z.array(z.string())
+});
+
+const RevisionSnapshotSchema = z.object({
+  bom: z.array(BomItemSchema),
+  validations: z.array(ValidationIssueSchema),
+  architectureBlocks: z.array(CircuitBlockSchema).optional()
+});
+
+const ProjectRevisionSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string(),
+  createdAt: z.string().min(1),
+  changes: z.array(z.string()),
+  snapshot: RevisionSnapshotSchema.optional()
 });
 
 export const ProjectSummarySchema = z.object({

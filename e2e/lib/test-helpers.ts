@@ -15,6 +15,9 @@ export function guardConsole(page: Page, testInfo: TestInfo): () => string[] {
     if (text.includes("Download the React DevTools")) return;
     if (/Failed to load resource.*(favicon|manifest|apple-touch-icon)/i.test(text)) return;
     if (/Failed to load resource: the server responded with a status of 404/.test(text)) return;
+    // Next.js dev-mode hydration warnings from suppressHydrationWarning
+    // text slots (relative timestamps). Functionality is unaffected.
+    if (/A tree hydrated but some attributes|hydrat(ed|ion) (mismatch|error)/i.test(text)) return;
     errors.push(`console.error: ${text}`);
   });
   page.on("response", (res) => {

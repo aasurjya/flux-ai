@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { mockProjects } from "@/lib/mock-data";
-import { ProjectSummary } from "@/types/project";
+import type { ProjectSummary, RevisionSnapshot } from "@/types/project";
 import { ProjectSummarySchema } from "@/lib/project-schema";
 import type { AiClient } from "@/lib/ai/client";
 import { getAiClient } from "@/lib/ai/client";
@@ -51,6 +51,15 @@ function splitListValue(value: string) {
 }
 
 import { slugify } from "@/lib/utils";
+
+/** Small helper so every revision that creates a snapshot does it the same way. */
+function snapshotOf(project: ProjectSummary): RevisionSnapshot {
+  return {
+    bom: project.outputs.bom,
+    validations: project.outputs.validations,
+    architectureBlocks: project.outputs.architectureBlocks
+  };
+}
 
 function isFileNotFoundError(error: unknown): error is { code: string } {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
@@ -150,7 +159,9 @@ function buildProjectFromInput(input: CreateProjectInput, existingProjects: Proj
   const normalizedConstraints = input.constraints.length > 0 ? input.constraints : ["Constraints pending review"];
   const normalizedPreferredParts = input.preferredParts.length > 0 ? input.preferredParts : ["Preferred parts not specified yet"];
 
-  return {
+  // Build the project shell first (with empty revisions) so we can
+  // snapshot its outputs into the initial revision.
+  const shell: ProjectSummary = {
     id: projectId,
     name: input.name,
     prompt: input.prompt,
@@ -190,20 +201,21 @@ function buildProjectFromInput(input: CreateProjectInput, existingProjects: Proj
       ],
       exportReady: false
     },
-    revisions: [
-      {
-        id: `rev-${randomUUID()}`,
-        title: "Initial brief",
-        description: "Created from the project prompt and first-pass constraints.",
-        createdAt: new Date().toISOString(),
-        changes: [
-          "Saved the project brief",
-          "Created starter architecture blocks",
-          "Prepared first review items and BOM placeholders"
-        ]
-      }
-    ]
+    revisions: []
   };
+  const initialRevision = {
+    id: `rev-${randomUUID()}`,
+    title: "Initial brief",
+    description: "Created from the project prompt and first-pass constraints.",
+    createdAt: new Date().toISOString(),
+    changes: [
+      "Saved the project brief",
+      "Created starter architecture blocks",
+      "Prepared first review items and BOM placeholders"
+    ],
+    snapshot: snapshotOf(shell)
+  };
+  return { ...shell, revisions: [initialRevision] };
 }
 
 export async function getProjects() {
@@ -314,7 +326,10 @@ export async function addRevision(input: AddRevisionInput) {
       title: input.title,
       description: input.description,
       createdAt: new Date().toISOString(),
-      changes: input.changes
+      changes: input.changes,
+      // Snapshot captures the outputs at the time of revision so the
+      // compare view can diff any two revisions structurally.
+      snapshot: snapshotOf(project)
     };
     const updatedProject = {
       ...project,
@@ -397,23 +412,31 @@ export async function runImproveDesign({
       throw new Error("Project was deleted during improvement");
     }
     const latestProject = latestStored[latestIndex];
+    const nextOutputs = {
+      ...latestProject.outputs,
+      bom: improvement.nextBom,
+      validations: nextValidations,
+      exportReady: false
+    };
     const newRevision = {
       id: `rev-${randomUUID()}`,
       title: `AI improvement: ${improvement.summary.slice(0, 80)}`,
       description: improvement.summary,
       createdAt: new Date().toISOString(),
-      changes: improvement.changes
+      changes: improvement.changes,
+      // Snapshot the POST-improvement outputs so the diff shows what
+      // this iteration actually produced.
+      snapshot: {
+        bom: nextOutputs.bom,
+        validations: nextOutputs.validations,
+        architectureBlocks: nextOutputs.architectureBlocks
+      }
     };
     const updated: ProjectSummary = {
       ...latestProject,
       status: "review",
       updatedAt: new Date().toISOString(),
-      outputs: {
-        ...latestProject.outputs,
-        bom: improvement.nextBom,
-        validations: nextValidations,
-        exportReady: false
-      },
+      outputs: nextOutputs,
       revisions: [newRevision, ...latestProject.revisions]
     };
     latestStored[latestIndex] = updated;
@@ -495,6 +518,14 @@ export async function generateProject({
       return paused;
     }
 
+    const newOutputs = {
+      requirements: result.requirements,
+      architecture: architectureSummary(result.architectureBlocks),
+      architectureBlocks: result.architectureBlocks,
+      bom: result.bom,
+      validations: result.validations,
+      exportReady: false
+    };
     const generationRevision = {
       id: `rev-${randomUUID()}`,
       title: "AI generation",
@@ -505,21 +536,21 @@ export async function generateProject({
         `Generated ${result.architectureBlocks.length}-block architecture`,
         `Selected ${result.bom.length} BOM items`,
         `Flagged ${result.validations.length} validation issues`
-      ]
+      ],
+      // Snapshot the NEW outputs (what this revision produced), not the
+      // old ones — so comparing old→new shows what changed.
+      snapshot: {
+        bom: newOutputs.bom,
+        validations: newOutputs.validations,
+        architectureBlocks: newOutputs.architectureBlocks
+      }
     };
 
     const updated: ProjectSummary = {
       ...currentProject,
       status: "review",
       updatedAt: new Date().toISOString(),
-      outputs: {
-        requirements: result.requirements,
-        architecture: architectureSummary(result.architectureBlocks),
-        architectureBlocks: result.architectureBlocks,
-        bom: result.bom,
-        validations: result.validations,
-        exportReady: false
-      },
+      outputs: newOutputs,
       clarifyingQuestions: undefined,
       clarifyingAnswers: effectiveAnswers,
       revisions: [generationRevision, ...currentProject.revisions]
