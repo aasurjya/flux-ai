@@ -19,6 +19,19 @@ export class AiClientError extends Error {
   }
 }
 
+/**
+ * Thrown when the LLM's tool_use input fails Zod validation. Separate
+ * from AiClientError so callStructured can retry it once — hallucinated
+ * outputs often fix themselves on a second try, especially after the
+ * model sees the tool signature again.
+ */
+export class SchemaViolationError extends AiClientError {
+  constructor(schemaName: string, zodError: unknown) {
+    super(`Schema violation for ${schemaName}`, zodError);
+    this.name = "SchemaViolationError";
+  }
+}
+
 export interface CallTextOptions {
   system: string;
   user: string;
@@ -45,6 +58,14 @@ export interface AiClientOptions {
   anthropic?: Anthropic;
   maxRetries?: number;
   baseDelayMs?: number;
+  /**
+   * How many extra attempts to make when the LLM output passes the
+   * network layer but fails Zod validation. 1 = try once, retry once
+   * on schema violation. 0 = fail immediately on schema mismatch.
+   * Based on 2026 guidance: keep low (2–3 max) because each retry
+   * costs a full LLM call.
+   */
+  maxSchemaRetries?: number;
 }
 
 const DEFAULT_MODEL = "claude-sonnet-4-5";
@@ -63,7 +84,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export function createAiClient(opts: AiClientOptions = {}): AiClient {
-  const { maxRetries = 3, baseDelayMs = 300, model = DEFAULT_MODEL } = opts;
+  const { maxRetries = 3, baseDelayMs = 300, maxSchemaRetries = 1, model = DEFAULT_MODEL } = opts;
 
   let sdk = opts.anthropic;
   if (!sdk) {
@@ -111,40 +132,60 @@ export function createAiClient(opts: AiClientOptions = {}): AiClient {
     const { system, user, schema, schemaName, schemaDescription, maxTokens = DEFAULT_MAX_TOKENS } = opts;
     const jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
 
-    return withRetry(async () => {
-      const response = await sdk!.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system,
-        messages: [{ role: "user", content: user }],
-        tools: [
-          {
-            name: schemaName,
-            description: schemaDescription,
-            // Anthropic tool input_schema accepts a JSON Schema object.
-            // Zod 4 emits draft-2020-12-compatible output.
-            input_schema: jsonSchema as unknown as Anthropic.Tool.InputSchema
+    // Schema-retry loop. Each attempt runs the full network-retry cycle.
+    // On SchemaViolationError we amend the user message with the Zod
+    // error so the model sees what it got wrong, then try again. Network
+    // errors still bubble via the outer withRetry.
+    let lastSchemaError: SchemaViolationError | null = null;
+    for (let schemaAttempt = 0; schemaAttempt <= maxSchemaRetries; schemaAttempt++) {
+      const userMessage = schemaAttempt === 0 || !lastSchemaError
+        ? user
+        : `${user}\n\n[Retry] Your previous response failed validation: ${String(
+            (lastSchemaError.cause as { message?: string } | undefined)?.message ?? "schema mismatch"
+          ).slice(0, 400)}. Emit a corrected response that matches the tool schema exactly.`;
+
+      try {
+        return await withRetry(async () => {
+          const response = await sdk!.messages.create({
+            model,
+            max_tokens: maxTokens,
+            system,
+            messages: [{ role: "user", content: userMessage }],
+            tools: [
+              {
+                name: schemaName,
+                description: schemaDescription,
+                // Anthropic tool input_schema accepts a JSON Schema object.
+                // Zod 4 emits draft-2020-12-compatible output.
+                input_schema: jsonSchema as unknown as Anthropic.Tool.InputSchema
+              }
+            ],
+            tool_choice: { type: "tool", name: schemaName }
+          });
+
+          const block = response.content.find(
+            (b) => b.type === "tool_use" && b.name === schemaName
+          );
+          if (!block || block.type !== "tool_use") {
+            throw new AiClientError(`Expected a tool_use block for ${schemaName}`);
           }
-        ],
-        tool_choice: { type: "tool", name: schemaName }
-      });
 
-      const block = response.content.find(
-        (b) => b.type === "tool_use" && b.name === schemaName
-      );
-      if (!block || block.type !== "tool_use") {
-        throw new AiClientError(`Expected a tool_use block for ${schemaName}`);
+          const parsed = schema.safeParse(block.input);
+          if (!parsed.success) {
+            throw new SchemaViolationError(schemaName, parsed.error);
+          }
+          return parsed.data;
+        });
+      } catch (err) {
+        if (err instanceof SchemaViolationError && schemaAttempt < maxSchemaRetries) {
+          lastSchemaError = err;
+          continue; // retry with corrective prompt
+        }
+        throw err;
       }
-
-      const parsed = schema.safeParse(block.input);
-      if (!parsed.success) {
-        throw new AiClientError(
-          `Schema validation failed for ${schemaName}: ${parsed.error.message}`,
-          parsed.error
-        );
-      }
-      return parsed.data;
-    });
+    }
+    // Exhausted retries — throw the last schema error
+    throw lastSchemaError!;
   }
 
   return { callText, callStructured };

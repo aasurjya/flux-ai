@@ -58,11 +58,20 @@ Produce a BOM list where each item has:
 - package: the physical package (e.g. "QFN-32", "0402", "SMA", "Module"). If truly unknown, use "TBD".
 - status: "selected" if a specific, appropriate, available part is chosen; "alternate" for suggested alternatives; "needs_review" if the choice depends on information the brief did not provide.
 
+Manufacturability (prefer in this order unless the brief says otherwise):
+1. JLCPCB Basic library parts (lowest assembly cost, always in stock)
+2. JLCPCB Extended library parts (low cost, wider selection)
+3. Mouser/DigiKey stocked parts with JLC alternates
+4. Specialty parts (only when no widely-stocked option fits)
+Prefer 0402 for general-purpose passives, 0603 for higher power or voltage,
+LQFP/QFN over BGA whenever the pin count and performance allow.
+
 Rules:
 - Cover every block in the architecture. No silent omissions.
 - Respect constraints: cost ceilings, 2-layer limits, SMD-only, etc.
 - Prefer parts in production (no NRND/EOL). If unsure, mark "needs_review".
-- Never invent part numbers. "needs_review" is a correct answer.`;
+- Never invent part numbers. "needs_review" is a correct answer.
+- When the brief specifies a cost ceiling, bias aggressively toward JLC Basic parts.`;
 
 export const VALIDATE_SYSTEM = `You are an experienced hardware engineer cross-checking a proposed architecture + BOM against the original requirements and constraints.
 

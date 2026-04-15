@@ -9,6 +9,8 @@ import { getAiClient } from "@/lib/ai/client";
 import { createStubAiClient } from "@/lib/ai/stub-client";
 import { runGenerationPipeline } from "@/lib/ai/pipeline";
 import { architectureSummary } from "@/lib/ai/generate-architecture";
+import { improveDesign } from "@/lib/ai/improve-design";
+import { runDesignRules } from "@/lib/ai/design-rules";
 import { buildKicadExport } from "@/lib/kicad/bundle";
 
 /**
@@ -283,6 +285,100 @@ export async function addRevision(input: AddRevisionInput) {
     storedProjects[projectIndex] = updatedProject;
     await writeStoredProjects(storedProjects);
     return updatedProject;
+  });
+}
+
+/**
+ * AI-driven design improvement. Reads the current project state,
+ * asks the LLM to propose targeted BOM edits (typically to resolve
+ * outstanding validation issues), applies them, re-runs deterministic
+ * design rules over the new BOM, and records a revision explaining
+ * the changes. Replaces the earlier cosmetic stub.
+ */
+export async function runImproveDesign({
+  projectId,
+  client
+}: {
+  projectId: string;
+  client?: AiClient;
+}): Promise<ProjectSummary> {
+  // Phase 1 (locked): read the project snapshot
+  const prelude = await withStoreLock(async () => {
+    const stored = await readStoredProjects();
+    const idx = stored.findIndex((p) => p.id === projectId);
+    if (idx === -1) throw new Error(`Project not found: ${projectId}`);
+    return { project: stored[idx] };
+  });
+  const { project } = prelude;
+
+  const architectureBlocks = project.outputs.architectureBlocks ?? [];
+  if (architectureBlocks.length === 0) {
+    throw new Error(
+      "Cannot improve: project has no architecture yet. Run 'Generate design' first."
+    );
+  }
+
+  // Phase 2 (unlocked): LLM call
+  const ai = client ?? selectPipelineClient();
+  const improvement = await improveDesign(ai, {
+    prompt: project.prompt,
+    requirements: project.outputs.requirements,
+    architectureBlocks,
+    bom: project.outputs.bom,
+    validations: project.outputs.validations,
+    constraints: project.constraints
+  });
+
+  // Re-run deterministic design rules against the new BOM so the
+  // validations list reflects what the improvement resolved or
+  // introduced. The LLM validator is NOT re-run here (expensive + the
+  // architecture didn't change). Existing LLM validations are kept.
+  const nextRules = runDesignRules({
+    requirements: project.outputs.requirements,
+    architectureBlocks,
+    bom: improvement.nextBom,
+    constraints: project.constraints
+  });
+  const oldRuleIds = new Set(
+    project.outputs.validations
+      .filter((v) => v.id.startsWith("dr-"))
+      .map((v) => v.id)
+  );
+  const keptLlmValidations = project.outputs.validations.filter(
+    (v) => !oldRuleIds.has(v.id)
+  );
+  const nextValidations = [...nextRules, ...keptLlmValidations];
+
+  // Phase 3 (locked): persist
+  return withStoreLock(async () => {
+    const latestStored = await readStoredProjects();
+    const latestIndex = latestStored.findIndex((p) => p.id === projectId);
+    if (latestIndex === -1) {
+      throw new Error("Project was deleted during improvement");
+    }
+    const latestProject = latestStored[latestIndex];
+    const newRevision = {
+      id: `rev-${randomUUID()}`,
+      title: `AI improvement: ${improvement.summary.slice(0, 80)}`,
+      description: improvement.summary,
+      createdAt: new Date().toISOString(),
+      changes: improvement.changes
+    };
+    const updated: ProjectSummary = {
+      ...latestProject,
+      status: "review",
+      updatedAt: new Date().toISOString(),
+      outputs: {
+        ...latestProject.outputs,
+        bom: improvement.nextBom,
+        validations: nextValidations,
+        exportReady: false
+      },
+      revisions: [newRevision, ...latestProject.revisions]
+    };
+    latestStored[latestIndex] = updated;
+    await writeStoredProjects(latestStored);
+    return updated;
   });
 }
 

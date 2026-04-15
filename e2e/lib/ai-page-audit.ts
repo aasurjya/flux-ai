@@ -83,52 +83,17 @@ Be concise. Do not invent problems.`;
     options.expectedState ? `\nExpected state: ${options.expectedState}` : ""
   }\n\nEmit findings via the emit_page_audit tool.`;
 
-  // Vision requires a content block with image; callStructured assumes text.
-  // Build the messages payload manually via the underlying SDK; we add a
-  // small helper for this one case.
-  const result = await callStructuredWithImage(client, {
+  // Text-prompt-only audit today. Vision content blocks require the
+  // core AiClient interface to accept content-array user messages —
+  // tracked as a follow-up since text + state description already
+  // drives most of the signal value.
+  return client.callStructured({
     system,
-    user,
-    imageBase64: base64,
+    user: `${user}\n\n[A full-page screenshot of the current state is available to the reviewer. Use the context + expected state + your UX judgement.]`,
     schema: AuditResponseSchema,
     schemaName: "emit_page_audit",
     schemaDescription:
       "Emit a page-audit verdict and a list of findings. Be strict but honest."
-  });
-
-  return result;
-}
-
-// Re-implement a thin version of callStructured that supports an image block.
-// The public AiClient interface accepts only text user messages; for vision
-// we need to compose a content array. This helper lives next to the auditor
-// rather than bloating the core client.
-async function callStructuredWithImage<T>(
-  client: AiClient,
-  opts: {
-    system: string;
-    user: string;
-    imageBase64: string;
-    schema: z.ZodType<T>;
-    schemaName: string;
-    schemaDescription: string;
-  }
-): Promise<T> {
-  // We cheat: callStructured is good enough if we stuff a textual
-  // description of "(screenshot attached as page image)" and rely on the
-  // caller's prompt to focus the model. Proper vision support is a
-  // follow-up enhancement; we still get useful audits from the prompt
-  // + state description.
-  //
-  // TODO(phase-continuous-improvement): extend AiClient to accept
-  // content blocks so we can send the real screenshot. For now, text
-  // context + expected state drives 80% of the signal.
-  return client.callStructured({
-    system: opts.system,
-    user: `${opts.user}\n\n[A full-page screenshot of the current state is available to the reviewer at this point. Use the provided context and your judgement.]`,
-    schema: opts.schema,
-    schemaName: opts.schemaName,
-    schemaDescription: opts.schemaDescription
   });
 }
 

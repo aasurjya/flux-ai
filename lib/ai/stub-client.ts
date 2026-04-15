@@ -85,5 +85,27 @@ const STUB_RESPONSES: Record<string, unknown> = {
   },
   emit_validations: {
     issues: STUB_ISSUES
+  },
+  propose_design_improvements: {
+    summary: "Resolved decoupling and pull-up findings from design-rule validator.",
+    bomAdditions: [
+      {
+        designator: "C1",
+        name: "100nF X7R ceramic decoupling",
+        package: "0402",
+        quantity: 4,
+        status: "selected",
+        rationale: "Resolves DR-DECOUPLING: one 100nF per active IC VDD pin within 3mm"
+      },
+      {
+        designator: "C2",
+        name: "10uF X5R bulk capacitor",
+        package: "0603",
+        quantity: 2,
+        status: "selected",
+        rationale: "Resolves DR-DECOUPLING: bulk energy reservoir per regulator output"
+      }
+    ],
+    bomRemovals: []
   }
 };

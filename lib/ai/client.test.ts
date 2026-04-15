@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import Anthropic from "@anthropic-ai/sdk";
-import { createAiClient, AiClientError } from "./client";
+import { createAiClient, AiClientError, SchemaViolationError } from "./client";
 
 // A minimal fake of the Anthropic SDK — exposes only the shape we use.
 // We stub messages.create; each test sets .mockResolvedValueOnce(...) or
@@ -86,10 +86,17 @@ describe("createAiClient", () => {
       expect(args.tool_choice).toEqual({ type: "tool", name: "emit_requirements" });
     });
 
-    it("throws AiClientError when schema validation fails", async () => {
+    it("throws SchemaViolationError when schema validation fails and retries exhausted", async () => {
       const { sdk, create } = makeFakeSdk();
-      create.mockResolvedValueOnce(toolResponse("emit_requirements", { items: [] })); // empty, fails .min(1)
-      const client = createAiClient({ apiKey: "test", anthropic: sdk, maxRetries: 0 });
+      create
+        .mockResolvedValueOnce(toolResponse("emit_requirements", { items: [] }))
+        .mockResolvedValueOnce(toolResponse("emit_requirements", { items: [] }));
+      const client = createAiClient({
+        apiKey: "test",
+        anthropic: sdk,
+        maxRetries: 0,
+        maxSchemaRetries: 1
+      });
 
       await expect(
         client.callStructured({
@@ -99,7 +106,35 @@ describe("createAiClient", () => {
           schemaName: "emit_requirements",
           schemaDescription: "Emit requirements"
         })
-      ).rejects.toBeInstanceOf(AiClientError);
+      ).rejects.toBeInstanceOf(SchemaViolationError);
+      // 1 initial + 1 schema retry = 2 calls
+      expect(create).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries once and recovers when the LLM fixes its output on second try", async () => {
+      const { sdk, create } = makeFakeSdk();
+      create
+        .mockResolvedValueOnce(toolResponse("emit_requirements", { items: [] })) // invalid
+        .mockResolvedValueOnce(toolResponse("emit_requirements", { items: ["a"] })); // valid
+      const client = createAiClient({
+        apiKey: "test",
+        anthropic: sdk,
+        maxRetries: 0,
+        maxSchemaRetries: 1
+      });
+
+      const out = await client.callStructured({
+        system: "s",
+        user: "u",
+        schema: Req,
+        schemaName: "emit_requirements",
+        schemaDescription: "Emit requirements"
+      });
+      expect(out).toEqual({ items: ["a"] });
+      expect(create).toHaveBeenCalledTimes(2);
+      // The retry prompt mentions the validation failure
+      const retryCall = create.mock.calls[1][0];
+      expect(retryCall.messages[0].content).toMatch(/Retry|previous response/i);
     });
   });
 

@@ -9,7 +9,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { AiWorkflowStages } from "@/components/ai-workflow-stages";
 import { CircuitGraph } from "@/components/circuit-graph";
 import { ExportJobCard } from "@/components/export-job-card";
-import { getProjectById, addRevision, generateProject, createExportJob, runExportJob } from "@/lib/project-store";
+import { getProjectById, generateProject, createExportJob, runExportJob, runImproveDesign } from "@/lib/project-store";
 import { AnswerQuestionsForm } from "./answer-questions-form";
 
 async function improveDesignAction(formData: FormData) {
@@ -20,16 +20,11 @@ async function improveDesignAction(formData: FormData) {
     throw new Error("Project ID is required");
   }
 
-  await addRevision({
-    projectId,
-    title: "Design improvement",
-    description: "Applied iterative refinement to the project brief and architecture.",
-    changes: [
-      "Analyzed current requirements and constraints",
-      "Identified potential optimizations in the architecture",
-      "Added refinement notes for next iteration"
-    ]
-  });
+  // Real AI improvement: reads the current design + open validations,
+  // proposes targeted BOM edits (add decoupling, remove contradictions),
+  // re-runs deterministic design rules against the new BOM, and records
+  // a revision with the rationale for every change.
+  await runImproveDesign({ projectId });
 
   revalidatePath(`/projects/${projectId}`);
 }
@@ -114,7 +109,7 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
                   {showGenerate && (
                     <form action={generateAction} className="contents">
                       <input type="hidden" name="projectId" value={currentProject.id} />
-                      <SubmitButton>
+                      <SubmitButton pendingLabel="Generating design...">
                         {isGenerating ? "Continue generation" : "Generate design"}
                       </SubmitButton>
                     </form>
@@ -123,11 +118,15 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
                     <>
                       <form action={exportAction} className="contents">
                         <input type="hidden" name="projectId" value={currentProject.id} />
-                        <SubmitButton variant="outline">Export to KiCad</SubmitButton>
+                        <SubmitButton variant="outline" pendingLabel="Exporting...">
+                          Export to KiCad
+                        </SubmitButton>
                       </form>
                       <form action={improveDesignAction} className="contents">
                         <input type="hidden" name="projectId" value={currentProject.id} />
-                        <SubmitButton>Improve design</SubmitButton>
+                        <SubmitButton pendingLabel="Improving...">
+                          Improve design
+                        </SubmitButton>
                       </form>
                     </>
                   )}

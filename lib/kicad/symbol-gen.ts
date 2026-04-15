@@ -16,16 +16,6 @@ import { hasStdSymbol } from "./symbol-map";
 const VERSION = 20231120;
 const GENERATOR = "flux_ai";
 
-// Simple deterministic uuid-like string from a seed. KiCad accepts any
-// valid UUID-shaped identifier; it doesn't have to be a real RFC4122 UUID
-// for the file to load.
-function pseudoUuid(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
-  const hex = (Math.abs(h).toString(16) + "00000000").slice(0, 8);
-  return `${hex}-0000-4000-8000-000000000001`;
-}
-
 function propertyNode(name: string, value: string, y: number): ReturnType<typeof node> {
   return node(
     "property",
@@ -86,8 +76,6 @@ export function generateSymbolLibrary(libName: string, bom: BomItem[]): string {
     node("generator", atom(GENERATOR)),
     ...customItems.map((item) => symbolNode(libName, item))
   );
-
-  void pseudoUuid(libName); // reserved for future extension
 
   return serialize(lib, { pretty: true }) + "\n";
 }
