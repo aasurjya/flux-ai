@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { createProject, generateProject, getProjectById } from "./project-store";
+import {
+  createProject,
+  generateProject,
+  getProjectById,
+  createExportJob,
+  runExportJob,
+  getExportFilePath
+} from "./project-store";
 import { createStubAiClient } from "./ai/stub-client";
 
 describe("generateProject integration (stub AI client)", () => {
@@ -11,10 +18,12 @@ describe("generateProject integration (stub AI client)", () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-test-"));
     process.env.FLUX_PROJECTS_FILE = path.join(tmpDir, "projects.json");
+    process.env.FLUX_EXPORTS_DIR = path.join(tmpDir, "exports");
   });
 
   afterEach(async () => {
     delete process.env.FLUX_PROJECTS_FILE;
+    delete process.env.FLUX_EXPORTS_DIR;
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -94,5 +103,68 @@ describe("generateProject integration (stub AI client)", () => {
     expect(finished.status).toBe("review");
     expect(finished.clarifyingQuestions).toBeUndefined();
     expect(finished.clarifyingAnswers).toEqual({ "Any question?": "Battery-powered" });
+  });
+});
+
+describe("runExportJob integration", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "flux-export-"));
+    process.env.FLUX_PROJECTS_FILE = path.join(tmpDir, "projects.json");
+    process.env.FLUX_EXPORTS_DIR = path.join(tmpDir, "exports");
+  });
+
+  afterEach(async () => {
+    delete process.env.FLUX_PROJECTS_FILE;
+    delete process.env.FLUX_EXPORTS_DIR;
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function seedGeneratedProject() {
+    const created = await createProject({
+      name: "Export Board",
+      prompt: "USB-C MCU board",
+      constraints: ["2-layer"],
+      preferredParts: []
+    });
+    await generateProject({ projectId: created.id, client: createStubAiClient() });
+    return created.id;
+  }
+
+  it("produces a completed job with a zip on disk", async () => {
+    const projectId = await seedGeneratedProject();
+    const { job } = await createExportJob({ projectId, format: "kicad" });
+
+    const completed = await runExportJob(projectId, job.id);
+
+    expect(completed.status).toBe("completed");
+    expect(completed.downloadUrl).toBe(`/api/exports/${job.id}/download`);
+    const stat = await fs.stat(getExportFilePath(job.id));
+    expect(stat.size).toBeGreaterThan(500);
+  });
+
+  it("fails gracefully with an error message when architecture is missing", async () => {
+    // Create project but DON'T generate → no architectureBlocks
+    const created = await createProject({
+      name: "No Arch",
+      prompt: "p",
+      constraints: [],
+      preferredParts: []
+    });
+    const { job } = await createExportJob({ projectId: created.id, format: "kicad" });
+
+    const failed = await runExportJob(created.id, job.id);
+
+    expect(failed.status).toBe("failed");
+    expect(failed.error).toMatch(/architecture/i);
+    // No zip should have been written
+    await expect(fs.stat(getExportFilePath(job.id))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("throws on unknown projectId or jobId", async () => {
+    await expect(runExportJob("nope", "x")).rejects.toThrow(/not found/i);
+    const projectId = await seedGeneratedProject();
+    await expect(runExportJob(projectId, "missing-job")).rejects.toThrow(/not found/i);
   });
 });
