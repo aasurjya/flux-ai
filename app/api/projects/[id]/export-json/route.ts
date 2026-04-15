@@ -23,15 +23,22 @@ export async function GET(
     return new Response("Project not found", { status: 404 });
   }
 
-  // Re-sanitize filename independently of the id regex so header
-  // injection is impossible even if the regex widens.
+  // RFC 6266 extended filename form — percent-encoded, unambiguous
+  // across clients, future-proof against any suffix changes.
   const safeFilename = `${id.replace(/[^a-zA-Z0-9_-]/g, "_")}.flux.json`;
+  const contentDisposition = `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(
+    safeFilename
+  )}`;
+
   return new Response(JSON.stringify(project, null, 2), {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      "Content-Disposition": `attachment; filename="${safeFilename}"`,
-      "Cache-Control": "private, max-age=0, must-revalidate"
+      "Content-Disposition": contentDisposition,
+      "Cache-Control": "private, max-age=0, must-revalidate",
+      // Prevents MIME sniffing — important because some older clients
+      // might otherwise interpret a crafted JSON payload as HTML.
+      "X-Content-Type-Options": "nosniff"
     }
   });
 }

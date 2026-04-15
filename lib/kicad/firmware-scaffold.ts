@@ -51,6 +51,20 @@ function pinMacro(blockId: string): string {
 }
 
 /**
+ * Sanitize a user-controlled label before it flows into generated C/C++
+ * or .ino source as a comment. Attacker-supplied labels can otherwise
+ * inject newlines + #include directives, or break out of block comments
+ * via `*` + `/` terminators. We strip newlines, control chars, and any
+ * sequence that could close or escape a line comment.
+ */
+function safeLabelForC(label: string): string {
+  return label
+    .replace(/[\r\n\x00-\x1f\x7f]/g, " ")
+    .replace(/\*\//g, "* /") // defuse block-comment terminator (defence-in-depth)
+    .slice(0, 120);
+}
+
+/**
  * Emit `pinMode(PIN_FOO, INPUT);` lines for each sensor/interface block.
  * When there are no pin blocks, emit an explanatory comment so the source
  * still compiles and documents the intent.
@@ -62,7 +76,7 @@ function renderPinModes(blocks: CircuitBlock[], leadingIndent = "  "): string {
   }
   const lines = pins.map((b) => {
     const mode = b.kind === "sensor" ? "INPUT" : "OUTPUT";
-    return `${leadingIndent}pinMode(${pinMacro(b.id)}, ${mode}); // ${b.label} (${b.kind})`;
+    return `${leadingIndent}pinMode(${pinMacro(b.id)}, ${mode}); // ${safeLabelForC(b.label)} (${b.kind})`;
   });
   return lines.join("\n");
 }
@@ -71,7 +85,10 @@ function renderPinMacros(blocks: CircuitBlock[]): string {
   const pins = pinBlocks(blocks);
   if (pins.length === 0) return "";
   return pins
-    .map((b, i) => `#define ${pinMacro(b.id)}  ${i + 2}  // ${b.label} — placeholder, assign real pin`)
+    .map(
+      (b, i) =>
+        `#define ${pinMacro(b.id)}  ${i + 2}  // ${safeLabelForC(b.label)} — placeholder, assign real pin`
+    )
     .join("\n");
 }
 

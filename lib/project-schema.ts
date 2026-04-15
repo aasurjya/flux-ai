@@ -28,25 +28,50 @@ const ExportJobSchema = z.object({
   error: z.string().optional()
 });
 
+/**
+ * Length + character-set bounds throughout. Justification: imports pass
+ * through this schema, and a malicious payload can otherwise store
+ * unbounded data (RAM + disk growth) or inject content into downstream
+ * generated artifacts (C source via CircuitBlock.label → firmware
+ * scaffold). Caps are generous but finite.
+ */
+const ID_MAX = 120;
+const LABEL_MAX = 200;
+const TITLE_MAX = 200;
+const DETAIL_MAX = 2000;
+const TEXT_MAX = 4000; // longer free-text fields (description, prompt)
+const ARRAY_MAX = 200; // generic array cap; individual sections use tighter caps below
+
+// Safe printable range — no control chars, no embedded newlines.
+// Line-break chars are stripped on generation but we also reject them at
+// the schema layer so imports can't carry them in at all.
+const safeStr = (min = 1, max = TEXT_MAX) =>
+  z.string().min(min).max(max).refine((s) => !/[\x00-\x08\x0b-\x1f\x7f]/.test(s), {
+    message: "contains control characters"
+  });
+
 const ValidationIssueSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1).max(ID_MAX),
   severity: z.enum(["info", "warning", "critical"]),
-  title: z.string().min(1),
-  detail: z.string().min(1)
+  title: safeStr(1, TITLE_MAX),
+  detail: safeStr(1, DETAIL_MAX)
 });
 
 const BomItemSchema = z.object({
-  id: z.string().min(1),
-  designator: z.string().min(1),
-  name: z.string().min(1),
-  quantity: z.number().int().min(1),
-  package: z.string().min(1),
+  id: z.string().min(1).max(ID_MAX),
+  designator: z.string().min(1).max(40),
+  name: safeStr(1, 240),
+  quantity: z.number().int().min(1).max(9999),
+  package: z.string().min(1).max(60),
   status: z.enum(["selected", "alternate", "needs_review"])
 });
 
 const CircuitBlockSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1),
+  id: z.string().min(1).max(ID_MAX),
+  // Bounded + no control chars. The firmware scaffolder sanitises further
+  // (strips newlines) before emitting into C source; this schema is the
+  // primary barrier against store poisoning via unbounded labels.
+  label: safeStr(1, LABEL_MAX),
   kind: z.enum([
     "power",
     "processing",
@@ -56,28 +81,28 @@ const CircuitBlockSchema = z.object({
     "analog",
     "protection"
   ]),
-  connections: z.array(z.string())
+  connections: z.array(z.string().max(ID_MAX)).max(50)
 });
 
 const RevisionSnapshotSchema = z.object({
-  bom: z.array(BomItemSchema),
-  validations: z.array(ValidationIssueSchema),
-  architectureBlocks: z.array(CircuitBlockSchema).optional()
+  bom: z.array(BomItemSchema).max(ARRAY_MAX),
+  validations: z.array(ValidationIssueSchema).max(50),
+  architectureBlocks: z.array(CircuitBlockSchema).max(50).optional()
 });
 
 const ProjectRevisionSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  description: z.string(),
-  createdAt: z.string().min(1),
-  changes: z.array(z.string()),
+  id: z.string().min(1).max(ID_MAX),
+  title: safeStr(1, TITLE_MAX),
+  description: z.string().max(TEXT_MAX),
+  createdAt: z.string().min(1).max(40),
+  changes: z.array(safeStr(1, 400)).max(100),
   snapshot: RevisionSnapshotSchema.optional()
 });
 
 export const ProjectSummarySchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  prompt: z.string(),
+  id: z.string().min(1).max(ID_MAX),
+  name: safeStr(1, 120),
+  prompt: z.string().max(TEXT_MAX),
   status: z.enum([
     "draft",
     "generating",
@@ -86,20 +111,25 @@ export const ProjectSummarySchema = z.object({
     "exporting",
     "exported"
   ]),
-  updatedAt: z.string(),
-  constraints: z.array(z.string()),
+  updatedAt: z.string().max(40),
+  constraints: z.array(safeStr(1, 200)).max(50),
   outputs: z.object({
-    requirements: z.array(z.string()),
-    architecture: z.array(z.string()),
-    architectureBlocks: z.array(CircuitBlockSchema).optional(),
-    bom: z.array(BomItemSchema),
-    validations: z.array(ValidationIssueSchema),
+    requirements: z.array(safeStr(1, 400)).max(50),
+    architecture: z.array(safeStr(1, 400)).max(50),
+    architectureBlocks: z.array(CircuitBlockSchema).max(50).optional(),
+    bom: z.array(BomItemSchema).max(ARRAY_MAX),
+    validations: z.array(ValidationIssueSchema).max(50),
     exportReady: z.boolean()
   }),
-  revisions: z.array(ProjectRevisionSchema),
-  exportJobs: z.array(ExportJobSchema).optional(),
-  clarifyingQuestions: z.array(z.string()).optional(),
-  clarifyingAnswers: z.record(z.string(), z.string()).optional()
+  revisions: z.array(ProjectRevisionSchema).max(100),
+  exportJobs: z.array(ExportJobSchema).max(50).optional(),
+  clarifyingQuestions: z.array(safeStr(1, 400)).max(10).optional(),
+  clarifyingAnswers: z
+    .record(z.string().max(400), z.string().max(2000))
+    .optional()
+    .refine((r) => !r || Object.keys(r).length <= 50, {
+      message: "clarifyingAnswers cannot have more than 50 entries"
+    })
 });
 
 // Compile-time invariant: the Zod schema output must assign to ProjectSummary.

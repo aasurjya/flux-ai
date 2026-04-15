@@ -36,15 +36,15 @@ export async function POST(request: NextRequest) {
 
   const parsed = ProjectSummarySchema.safeParse(body);
   if (!parsed.success) {
-    // Log full Zod detail server-side, return a sanitised summary
-    console.warn("[import-route] schema rejection", parsed.error.issues.slice(0, 5));
+    // Log the FULL Zod detail server-side (for operators), but return
+    // only a generic count to the client. Returning path segments would
+    // leak internal schema shape (e.g., "revisions.0.snapshot.bom.3.status")
+    // to an unauthenticated caller.
+    console.warn("[import-route] schema rejection", parsed.error.issues.slice(0, 10));
     return Response.json(
       {
         error: "Imported project does not match the expected schema",
-        issues: parsed.error.issues.slice(0, 10).map((i) => ({
-          path: i.path.join("."),
-          message: i.message
-        }))
+        issueCount: parsed.error.issues.length
       },
       { status: 400 }
     );

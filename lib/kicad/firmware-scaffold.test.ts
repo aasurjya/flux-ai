@@ -121,4 +121,40 @@ describe("generateFirmwareEntries", () => {
     // Source should still compile — no dangling content
     expect(src).toMatch(/\/\/ No .* blocks detected|no pins to configure|TODO: configure/i);
   });
+
+  it("sanitizes attacker-controlled block labels before emitting into C source", () => {
+    const malicious: CircuitBlock[] = [
+      {
+        id: "bad",
+        label: "evil\n#include <secrets.h>\nvoid exploit() { system(\"rm -rf /\"); ",
+        kind: "sensor",
+        connections: []
+      }
+    ];
+    const entries = generateFirmwareEntries(bom({ name: "ESP32-S3" }), malicious);
+    const src = entries.find((e) => e.name === "firmware/src/main.cpp")!.content;
+    // Strip trailing // comments from every line, then verify no
+    // malicious fragments made it into the EXECUTABLE portion. A line
+    // like `#define PIN_BAD 2  // evil #include ...` is safe — the
+    // attacker content sits after the // and is inert.
+    const codeOnly = src
+      .split("\n")
+      .map((l) => {
+        const commentIdx = l.indexOf("//");
+        return commentIdx === -1 ? l : l.slice(0, commentIdx);
+      })
+      .join("\n");
+    expect(codeOnly).not.toMatch(/secrets\.h|void exploit|rm -rf/);
+    // Sanitizer preserves text content inside a single-line comment
+    expect(src).toContain("evil");
+  });
+
+  it("defuses */ block-comment terminators in labels", () => {
+    const escape: CircuitBlock[] = [
+      { id: "x", label: "break */ out /*", kind: "interface", connections: [] }
+    ];
+    const entries = generateFirmwareEntries(bom({ name: "ESP32-S3" }), escape);
+    const src = entries.find((e) => e.name === "firmware/src/main.cpp")!.content;
+    expect(src).not.toContain("*/");
+  });
 });

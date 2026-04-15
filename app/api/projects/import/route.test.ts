@@ -34,13 +34,14 @@ describe("POST /api/projects/import", () => {
     expect(body.error).toMatch(/invalid json/i);
   });
 
-  it("returns 400 with field-level issues when schema validation fails", async () => {
+  it("returns 400 with a generic issueCount when schema validation fails (no path leak)", async () => {
     const res = await POST(makeRequest({ id: "x" })); // missing name/prompt/outputs/etc
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.issues).toBeDefined();
-    expect(Array.isArray(body.issues)).toBe(true);
-    expect(body.issues.length).toBeGreaterThan(0);
+    expect(body.error).toMatch(/schema/i);
+    expect(body.issueCount).toBeGreaterThan(0);
+    // Do not leak internal schema paths to unauthenticated callers
+    expect(body.issues).toBeUndefined();
   });
 
   it("returns 413 when Content-Length exceeds MAX_BYTES", async () => {
