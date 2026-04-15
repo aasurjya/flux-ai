@@ -65,4 +65,18 @@ describe("CircuitGraph", () => {
     expect(w).toBeGreaterThan(400);
     expect(h).toBeGreaterThan(64);
   });
+
+  it("renders a legend listing only the block kinds actually present", () => {
+    const html = renderToStaticMarkup(<CircuitGraph blocks={blocks} />);
+    // Blocks in the test fixture: interface, protection, power, processing, sensor
+    // Not present: storage, analog — should NOT appear in legend
+    const legendRegion = html.slice(html.indexOf("Legend"));
+    expect(legendRegion).toContain("interface");
+    expect(legendRegion).toContain("protection");
+    expect(legendRegion).toContain("power");
+    expect(legendRegion).toContain("processing");
+    expect(legendRegion).toContain("sensor");
+    expect(legendRegion).not.toContain(">storage<");
+    expect(legendRegion).not.toContain(">analog<");
+  });
 });

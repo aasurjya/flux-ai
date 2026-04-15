@@ -9,6 +9,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { AiWorkflowStages } from "@/components/ai-workflow-stages";
 import { CircuitGraph } from "@/components/circuit-graph";
 import { ExportJobCard } from "@/components/export-job-card";
+import { formatRelative } from "@/lib/format-relative";
 import { getProjectById, generateProject, createExportJob, runExportJob, runImproveDesign } from "@/lib/project-store";
 import { AnswerQuestionsForm } from "./answer-questions-form";
 
@@ -209,17 +210,34 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
                 {currentProject.revisions.map((revision) => (
                   <div key={revision.id} className="rounded-xl border border-border/70 bg-background/30 p-4">
                     <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <h3 className="font-medium text-foreground">{revision.title}</h3>
-                        <p className="text-sm text-muted-foreground">{revision.description}</p>
+                      <div className="min-w-0">
+                        <h3 className="break-words font-medium text-foreground">{revision.title}</h3>
+                        <p className="break-words text-sm text-muted-foreground">{revision.description}</p>
                       </div>
-                      <p className="text-xs text-muted-foreground">{revision.createdAt}</p>
+                      <p className="shrink-0 text-xs text-muted-foreground">
+                        {formatRelative(revision.createdAt)}
+                      </p>
                     </div>
-                    <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                      {revision.changes.map((change) => (
-                        <p key={change}>- {change}</p>
-                      ))}
-                    </div>
+                    <ul className="mt-3 space-y-1.5 text-sm text-muted-foreground">
+                      {revision.changes.map((change, i) => {
+                        const isAdd = /^added\b/i.test(change);
+                        const isRemove = /^removed\b/i.test(change);
+                        const sigil = isAdd ? "+" : isRemove ? "−" : "•";
+                        const sigilColor = isAdd
+                          ? "text-emerald-400"
+                          : isRemove
+                          ? "text-rose-400"
+                          : "text-muted-foreground";
+                        return (
+                          <li key={`${revision.id}-change-${i}`} className="flex gap-2 break-words">
+                            <span aria-hidden className={`font-mono font-bold ${sigilColor}`}>
+                              {sigil}
+                            </span>
+                            <span className="min-w-0">{change}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
                 ))}
               </CardContent>
