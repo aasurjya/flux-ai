@@ -282,8 +282,8 @@ export default async function ProjectWorkspacePage({
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <form method="GET" className="flex flex-wrap items-end gap-3">
-                    <div className="flex-1 min-w-[150px] space-y-1">
+                  <form method="GET" className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <div className="min-w-0 flex-1 space-y-1">
                       <label htmlFor="compareA" className="text-xs font-medium text-muted-foreground">
                         Revision A
                       </label>
@@ -301,7 +301,7 @@ export default async function ProjectWorkspacePage({
                         ))}
                       </select>
                     </div>
-                    <div className="flex-1 min-w-[150px] space-y-1">
+                    <div className="min-w-0 flex-1 space-y-1">
                       <label htmlFor="compareB" className="text-xs font-medium text-muted-foreground">
                         Revision B
                       </label>
@@ -319,10 +319,17 @@ export default async function ProjectWorkspacePage({
                         ))}
                       </select>
                     </div>
-                    <Button type="submit" variant="outline" size="sm">
+                    <Button type="submit" variant="outline" size="sm" className="shrink-0">
                       Compare
                     </Button>
                   </form>
+                  {/* User picked the same revision on both sides — give feedback
+                      rather than silently hiding the diff panel. */}
+                  {compareA && compareB && compareA.id === compareB.id && (
+                    <p className="text-sm text-amber-400">
+                      Select two different revisions to compare.
+                    </p>
+                  )}
                   {comparePair && (
                     <RevisionCompare older={comparePair.older!} newer={comparePair.newer!} />
                   )}

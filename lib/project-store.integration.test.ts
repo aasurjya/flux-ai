@@ -266,6 +266,36 @@ describe("runExportJob integration", () => {
     expect(imported.revisions[0].id.startsWith("rev-")).toBe(true);
   });
 
+  it("importProject resets status to 'draft' even when source was exported", async () => {
+    const source: Parameters<typeof importProject>[0] = {
+      id: "any",
+      name: "Previously Exported",
+      prompt: "p",
+      status: "exported",
+      updatedAt: new Date().toISOString(),
+      constraints: [],
+      outputs: {
+        requirements: [],
+        architecture: [],
+        bom: [],
+        validations: [],
+        exportReady: true // source claimed ready
+      },
+      revisions: [
+        {
+          id: "rev-x",
+          title: "seed",
+          description: "",
+          createdAt: new Date().toISOString(),
+          changes: []
+        }
+      ]
+    };
+    const imported = await importProject(source);
+    expect(imported.status).toBe("draft");
+    expect(imported.outputs.exportReady).toBe(false);
+  });
+
   it("importProject strips exportJobs from the source", async () => {
     const source: Parameters<typeof importProject>[0] = {
       id: "any",

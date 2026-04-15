@@ -26,7 +26,11 @@ export async function POST(request: NextRequest) {
   let body: unknown;
   try {
     const text = await request.text();
-    if (text.length > MAX_BYTES) {
+    // Use UTF-8 byte count, not String.length (which counts UTF-16 code
+    // units). A 4-byte Unicode codepoint would otherwise under-count and
+    // let a 9.9 MB payload slip past a 5 MB text-length guard.
+    const byteLength = Buffer.byteLength(text, "utf8");
+    if (byteLength > MAX_BYTES) {
       return Response.json({ error: "Payload too large (max 5 MB)" }, { status: 413 });
     }
     body = JSON.parse(text);

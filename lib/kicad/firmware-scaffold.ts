@@ -65,9 +65,16 @@ function safeLabelForC(label: string): string {
 }
 
 /**
- * Emit `pinMode(PIN_FOO, INPUT);` lines for each sensor/interface block.
- * When there are no pin blocks, emit an explanatory comment so the source
- * still compiles and documents the intent.
+ * Emit setup() body lines for each sensor/interface block.
+ *
+ * Sensors default to `INPUT` — safe assumption for an analog or digital
+ * read. Interfaces (I2C, SPI, UART, USB, headers) are bidirectional or
+ * driver-configured; a bare `OUTPUT` here can cause bus contention on
+ * shared lines. We emit those as a COMMENTED-OUT pinMode so the engineer
+ * sees the intent but is forced to choose direction before flashing.
+ *
+ * When there are no pin blocks, emit an explanatory comment so the
+ * source still compiles and documents the intent.
  */
 function renderPinModes(blocks: CircuitBlock[], leadingIndent = "  "): string {
   const pins = pinBlocks(blocks);
@@ -75,19 +82,33 @@ function renderPinModes(blocks: CircuitBlock[], leadingIndent = "  "): string {
     return `${leadingIndent}// No sensor/interface blocks detected — nothing to configure.\n${leadingIndent}// TODO: configure pins once the hardware is known.`;
   }
   const lines = pins.map((b) => {
-    const mode = b.kind === "sensor" ? "INPUT" : "OUTPUT";
-    return `${leadingIndent}pinMode(${pinMacro(b.id)}, ${mode}); // ${safeLabelForC(b.label)} (${b.kind})`;
+    const label = safeLabelForC(b.label);
+    if (b.kind === "sensor") {
+      return `${leadingIndent}pinMode(${pinMacro(b.id)}, INPUT); // ${label} (sensor)`;
+    }
+    // Interface direction depends on bus role — never silently default
+    // to OUTPUT. Emit commented so flashing without review fails loudly.
+    return `${leadingIndent}// pinMode(${pinMacro(b.id)}, INPUT); // ${label} (interface — choose INPUT or OUTPUT before uncommenting)`;
   });
   return lines.join("\n");
 }
+
+/**
+ * Pin placeholders use 255 — guaranteed invalid on every supported MCU.
+ * Starting at `i + 2` was misleading: 2/3/4/5 are real Arduino digital
+ * pins and made placeholder values look plausible, so engineers could
+ * accidentally flash without replacing them. An invalid sentinel forces
+ * a compile-time or run-time failure until real pins are chosen.
+ */
+const PIN_PLACEHOLDER = 255;
 
 function renderPinMacros(blocks: CircuitBlock[]): string {
   const pins = pinBlocks(blocks);
   if (pins.length === 0) return "";
   return pins
     .map(
-      (b, i) =>
-        `#define ${pinMacro(b.id)}  ${i + 2}  // ${safeLabelForC(b.label)} — placeholder, assign real pin`
+      (b) =>
+        `#define ${pinMacro(b.id)}  ${PIN_PLACEHOLDER}  // ${safeLabelForC(b.label)} — REPLACE before flashing`
     )
     .join("\n");
 }

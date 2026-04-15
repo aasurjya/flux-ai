@@ -54,6 +54,26 @@ export function computeRevisionDiff(
   older: RevisionSnapshot,
   newer: RevisionSnapshot
 ): RevisionDiff {
+  // Guard against duplicate designators — a known LLM failure mode.
+  // The Map constructor silently discards earlier entries, which would
+  // produce a wrong diff. Warn in dev so the issue surfaces.
+  if (process.env.NODE_ENV !== "production") {
+    const checkDupes = (label: string, items: { designator: string }[]) => {
+      const seen = new Set<string>();
+      for (const item of items) {
+        if (seen.has(item.designator)) {
+          console.warn(
+            `[revision-diff] duplicate designator '${item.designator}' in ${label} snapshot — diff may be incorrect`
+          );
+          break;
+        }
+        seen.add(item.designator);
+      }
+    };
+    checkDupes("older", older.bom);
+    checkDupes("newer", newer.bom);
+  }
+
   // BOM diff by designator
   const olderByDes = new Map(older.bom.map((b) => [b.designator, b]));
   const newerByDes = new Map(newer.bom.map((b) => [b.designator, b]));

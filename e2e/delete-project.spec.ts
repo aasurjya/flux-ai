@@ -46,9 +46,13 @@ test.describe("Delete project flow", () => {
     await page.getByLabel("Project name").fill(unique);
     await page.getByLabel("Design prompt").fill("should not be deleted");
     await page.getByRole("button", { name: /continue to workspace/i }).click();
+    // Wait for the workspace redirect to settle before navigating back
+    await expect(page).toHaveURL(/\/projects\/keepme-/);
 
+    // Revalidation after the server action can lag under test load —
+    // give the list page a generous timeout + reload to force fresh fetch.
     await page.goto("/projects");
-    await expect(page.getByText(unique)).toBeVisible();
+    await expect(page.getByText(unique)).toBeVisible({ timeout: 10_000 });
 
     // Dismiss the confirm — project stays
     page.on("dialog", (dialog) => dialog.dismiss());

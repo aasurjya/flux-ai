@@ -291,7 +291,16 @@ export async function importProject(source: ProjectSummary): Promise<ProjectSumm
     const imported: ProjectSummary = {
       ...source,
       id: newId,
+      // Reset status to 'draft' — the source may have been 'exported' or
+      // 'exporting' on the origin host, but those states reference zip
+      // files that don't exist here. A fresh import starts clean.
+      status: "draft",
       updatedAt: new Date().toISOString(),
+      outputs: {
+        ...source.outputs,
+        // Origin's export-readiness isn't transferable across hosts.
+        exportReady: false
+      },
       revisions: source.revisions.map((r) => ({
         ...r,
         id: `rev-${randomUUID()}`

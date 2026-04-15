@@ -103,6 +103,41 @@ describe("generateFirmwareEntries", () => {
     expect(src).toContain("pinMode(");
   });
 
+  it("pin macros use 255 sentinel (invalid on every MCU) instead of looking-plausible small ints", () => {
+    const entries = generateFirmwareEntries(bom({ name: "ESP32-S3" }), blocks);
+    const src = entries.find((e) => e.name === "firmware/src/main.cpp")!.content;
+    // Every #define in the macro section must use 255, not 2/3/4/5
+    const defines = src.match(/#define PIN_\w+\s+(\d+)/g) ?? [];
+    expect(defines.length).toBeGreaterThan(0);
+    for (const d of defines) {
+      const value = parseInt(d.match(/(\d+)\s*$/)![1], 10);
+      expect(value).toBe(255);
+    }
+    expect(src).toContain("REPLACE before flashing");
+  });
+
+  it("interface blocks emit commented-out pinMode (direction is ambiguous)", () => {
+    const ifaceOnly = [
+      { id: "i2c", label: "I2C Bus", kind: "interface" as const, connections: [] }
+    ];
+    const entries = generateFirmwareEntries(bom({ name: "ESP32-S3" }), ifaceOnly);
+    const src = entries.find((e) => e.name === "firmware/src/main.cpp")!.content;
+    // Interface pinMode is commented out — never silently OUTPUT
+    expect(src).toMatch(/\/\/\s*pinMode\(PIN_I2C/);
+    expect(src).toMatch(/choose INPUT or OUTPUT/i);
+    // Must not have a bare uncommented pinMode(PIN_I2C, OUTPUT)
+    expect(src).not.toMatch(/^\s*pinMode\(PIN_I2C, OUTPUT\)/m);
+  });
+
+  it("sensor blocks still get a bare pinMode(..., INPUT)", () => {
+    const sensorOnly = [
+      { id: "imu", label: "IMU", kind: "sensor" as const, connections: [] }
+    ];
+    const entries = generateFirmwareEntries(bom({ name: "ESP32-S3" }), sensorOnly);
+    const src = entries.find((e) => e.name === "firmware/src/main.cpp")!.content;
+    expect(src).toMatch(/^\s*pinMode\(PIN_IMU, INPUT\);/m);
+  });
+
   it("README explicitly flags pin numbers as placeholders", () => {
     const entries = generateFirmwareEntries(bom({ name: "ESP32-S3" }), blocks);
     const readme = entries.find((e) => e.name === "firmware/README.md")!.content;
