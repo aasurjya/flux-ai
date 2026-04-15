@@ -1,13 +1,34 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { mockProjects } from "@/lib/mock-data";
 import { ProjectSummary } from "@/types/project";
+import { ProjectSummarySchema } from "@/lib/project-schema";
 import type { AiClient } from "@/lib/ai/client";
 import { getAiClient } from "@/lib/ai/client";
 import { createStubAiClient } from "@/lib/ai/stub-client";
 import { runGenerationPipeline } from "@/lib/ai/pipeline";
 import { architectureSummary } from "@/lib/ai/generate-architecture";
 import { buildKicadExport } from "@/lib/kicad/bundle";
+
+/**
+ * In-process promise-chain mutex. Every mutating call routes through
+ * withStoreLock so concurrent read-modify-write sequences don't
+ * clobber each other on the shared JSON file.
+ *
+ * This is a single-process server protection — it does NOT protect
+ * against multiple Next.js worker processes or multiple deployments
+ * hitting the same file. For that, move to SQLite.
+ */
+let storeLock: Promise<unknown> = Promise.resolve();
+function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = storeLock.then(fn, fn);
+  // Detach: errors in one holder must not poison the next waiter
+  storeLock = next.catch(() => {
+    /* swallow */
+  });
+  return next;
+}
 
 interface CreateProjectInput {
   name: string;
@@ -39,25 +60,52 @@ function isFileNotFoundError(error: unknown): error is { code: string } {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
-async function readStoredProjects() {
+async function readStoredProjects(): Promise<ProjectSummary[]> {
   try {
     const fileContents = await fs.readFile(getProjectsFilePath(), "utf8");
-    const parsedProjects = JSON.parse(fileContents) as ProjectSummary[];
-
-    return Array.isArray(parsedProjects) ? parsedProjects : [];
+    const raw = JSON.parse(fileContents);
+    if (!Array.isArray(raw)) return [];
+    // Schema-validate every entry. Drop invalid ones rather than crash
+    // the entire read — one corrupt record shouldn't blow up the UI.
+    const valid: ProjectSummary[] = [];
+    for (const item of raw) {
+      const parsed = ProjectSummarySchema.safeParse(item);
+      if (parsed.success) {
+        valid.push(parsed.data);
+      } else {
+        console.warn(
+          `[project-store] dropping invalid stored project (${item?.id ?? "unknown"}): ${parsed.error.issues[0]?.message ?? "schema mismatch"}`
+        );
+      }
+    }
+    return valid;
   } catch (error) {
-    if (isFileNotFoundError(error)) {
+    if (isFileNotFoundError(error)) return [];
+    if (error instanceof SyntaxError) {
+      // File exists but is corrupt JSON. Log and start fresh — the
+      // alternative (throw) bricks every request until a human edits
+      // the file. Starting fresh also preserves mockProjects as seed.
+      console.error("[project-store] projects.json is not valid JSON, starting fresh");
       return [];
     }
-
     throw error;
   }
 }
 
 async function writeStoredProjects(projects: ProjectSummary[]) {
+  // Atomic write via temp + rename. Avoids truncating the real file
+  // mid-write on crash / SIGTERM / out-of-disk.
   const filePath = getProjectsFilePath();
   await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, JSON.stringify(projects, null, 2), "utf8");
+  const tmp = `${filePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(projects, null, 2), "utf8");
+    await fs.rename(tmp, filePath);
+  } catch (err) {
+    // Best-effort cleanup if rename fails
+    fs.unlink(tmp).catch(() => {});
+    throw err;
+  }
 }
 
 function buildStarterBom(preferredParts: string[]): ProjectSummary["outputs"]["bom"] {
@@ -111,7 +159,7 @@ function buildProjectFromInput(input: CreateProjectInput, existingProjects: Proj
     name: input.name,
     prompt: input.prompt,
     status: "draft",
-    updatedAt: "Updated just now",
+    updatedAt: new Date().toISOString(),
     constraints: normalizedConstraints,
     outputs: {
       requirements: [
@@ -129,13 +177,13 @@ function buildProjectFromInput(input: CreateProjectInput, existingProjects: Proj
       bom: buildStarterBom(input.preferredParts),
       validations: [
         {
-          id: "validation-1",
+          id: `validation-${randomUUID()}`,
           severity: "warning",
           title: "Confirm the power tree",
           detail: "Validate input voltage, regulation strategy, and battery or external power expectations before schematic export."
         },
         {
-          id: "validation-2",
+          id: `validation-${randomUUID()}`,
           severity: input.preferredParts.length > 0 ? "info" : "warning",
           title: "Review selected components",
           detail:
@@ -148,10 +196,10 @@ function buildProjectFromInput(input: CreateProjectInput, existingProjects: Proj
     },
     revisions: [
       {
-        id: "rev-1",
+        id: `rev-${randomUUID()}`,
         title: "Initial brief",
         description: "Created from the project prompt and first-pass constraints.",
-        createdAt: "Just now",
+        createdAt: new Date().toISOString(),
         changes: [
           "Saved the project brief",
           "Created starter architecture blocks",
@@ -175,13 +223,33 @@ export async function getProjectById(id: string) {
 }
 
 export async function createProject(input: CreateProjectInput) {
-  const storedProjects = await readStoredProjects();
-  const project = buildProjectFromInput(input, [...storedProjects, ...mockProjects]);
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const project = buildProjectFromInput(input, [...storedProjects, ...mockProjects]);
+    storedProjects.unshift(project);
+    await writeStoredProjects(storedProjects);
+    return project;
+  });
+}
 
-  storedProjects.unshift(project);
-  await writeStoredProjects(storedProjects);
-
-  return project;
+export async function deleteProject(projectId: string): Promise<boolean> {
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const idx = storedProjects.findIndex((p) => p.id === projectId);
+    if (idx === -1) return false;
+    // Unlink any remaining export zips for this project (best effort)
+    const jobs = storedProjects[idx].exportJobs ?? [];
+    await Promise.all(
+      jobs.map((j) =>
+        fs.unlink(getExportFilePath(j.id)).catch(() => {
+          /* already gone is fine */
+        })
+      )
+    );
+    storedProjects.splice(idx, 1);
+    await writeStoredProjects(storedProjects);
+    return true;
+  });
 }
 
 interface AddRevisionInput {
@@ -192,35 +260,30 @@ interface AddRevisionInput {
 }
 
 export async function addRevision(input: AddRevisionInput) {
-  const storedProjects = await readStoredProjects();
-  const projectIndex = storedProjects.findIndex((p) => p.id === input.projectId);
-
-  if (projectIndex === -1) {
-    throw new Error(`Project not found: ${input.projectId}`);
-  }
-
-  const project = storedProjects[projectIndex];
-  const revisionNumber = project.revisions.length + 1;
-
-  const newRevision = {
-    id: `rev-${revisionNumber}`,
-    title: input.title,
-    description: input.description,
-    createdAt: "Just now",
-    changes: input.changes
-  };
-
-  const updatedProject = {
-    ...project,
-    revisions: [newRevision, ...project.revisions],
-    updatedAt: "Updated just now",
-    status: "review" as const
-  };
-
-  storedProjects[projectIndex] = updatedProject;
-  await writeStoredProjects(storedProjects);
-
-  return updatedProject;
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const projectIndex = storedProjects.findIndex((p) => p.id === input.projectId);
+    if (projectIndex === -1) {
+      throw new Error(`Project not found: ${input.projectId}`);
+    }
+    const project = storedProjects[projectIndex];
+    const newRevision = {
+      id: `rev-${randomUUID()}`,
+      title: input.title,
+      description: input.description,
+      createdAt: new Date().toISOString(),
+      changes: input.changes
+    };
+    const updatedProject = {
+      ...project,
+      revisions: [newRevision, ...project.revisions],
+      updatedAt: new Date().toISOString(),
+      status: "review" as const
+    };
+    storedProjects[projectIndex] = updatedProject;
+    await writeStoredProjects(storedProjects);
+    return updatedProject;
+  });
 }
 
 interface GenerateProjectInput {
@@ -249,18 +312,18 @@ export async function generateProject({
   clarifyingAnswers,
   client
 }: GenerateProjectInput): Promise<ProjectSummary> {
-  const storedProjects = await readStoredProjects();
-  const projectIndex = storedProjects.findIndex((p) => p.id === projectId);
-  if (projectIndex === -1) {
-    throw new Error(`Project not found: ${projectId}`);
-  }
-  const project = storedProjects[projectIndex];
+  // Read project inside the lock, then release the lock while the LLM
+  // call runs (can be 30s+), then re-acquire to persist the result.
+  // If the project moved out from under us, we still write atomically.
+  const prelude = await withStoreLock(async () => {
+    const stored = await readStoredProjects();
+    const idx = stored.findIndex((p) => p.id === projectId);
+    if (idx === -1) throw new Error(`Project not found: ${projectId}`);
+    return { project: stored[idx], effectiveAnswers: clarifyingAnswers ?? stored[idx].clarifyingAnswers };
+  });
+  const { project, effectiveAnswers } = prelude;
 
   const ai = client ?? selectPipelineClient();
-
-  // Merge prior answers (from persisted state) with the ones passed in now.
-  const effectiveAnswers = clarifyingAnswers ?? project.clarifyingAnswers;
-
   const result = await runGenerationPipeline(ai, {
     prompt: project.prompt,
     constraints: project.constraints,
@@ -268,57 +331,63 @@ export async function generateProject({
     clarifyingAnswers: effectiveAnswers
   });
 
-  if (result.kind === "paused") {
-    // Persist the pause state so the workspace can show the form.
-    const paused: ProjectSummary = {
-      ...project,
-      status: "generating",
-      updatedAt: "Updated just now",
-      outputs: {
-        ...project.outputs,
-        requirements: result.requirements
-      },
-      clarifyingQuestions: result.questions,
-      clarifyingAnswers: undefined
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const projectIndex = storedProjects.findIndex((p) => p.id === projectId);
+    if (projectIndex === -1) throw new Error(`Project not found: ${projectId}`);
+    const currentProject = storedProjects[projectIndex];
+
+    if (result.kind === "paused") {
+      const paused: ProjectSummary = {
+        ...currentProject,
+        status: "generating",
+        updatedAt: new Date().toISOString(),
+        outputs: {
+          ...currentProject.outputs,
+          requirements: result.requirements
+        },
+        clarifyingQuestions: result.questions,
+        clarifyingAnswers: undefined
+      };
+      storedProjects[projectIndex] = paused;
+      await writeStoredProjects(storedProjects);
+      return paused;
+    }
+
+    const generationRevision = {
+      id: `rev-${randomUUID()}`,
+      title: "AI generation",
+      description: "Ran prompt → requirements → architecture → BOM → validation through the AI pipeline.",
+      createdAt: new Date().toISOString(),
+      changes: [
+        `Produced ${result.requirements.length} requirements`,
+        `Generated ${result.architectureBlocks.length}-block architecture`,
+        `Selected ${result.bom.length} BOM items`,
+        `Flagged ${result.validations.length} validation issues`
+      ]
     };
-    storedProjects[projectIndex] = paused;
+
+    const updated: ProjectSummary = {
+      ...currentProject,
+      status: "review",
+      updatedAt: new Date().toISOString(),
+      outputs: {
+        requirements: result.requirements,
+        architecture: architectureSummary(result.architectureBlocks),
+        architectureBlocks: result.architectureBlocks,
+        bom: result.bom,
+        validations: result.validations,
+        exportReady: false
+      },
+      clarifyingQuestions: undefined,
+      clarifyingAnswers: effectiveAnswers,
+      revisions: [generationRevision, ...currentProject.revisions]
+    };
+
+    storedProjects[projectIndex] = updated;
     await writeStoredProjects(storedProjects);
-    return paused;
-  }
-
-  const generationRevision = {
-    id: `rev-${project.revisions.length + 1}`,
-    title: "AI generation",
-    description: "Ran prompt → requirements → architecture → BOM → validation through the AI pipeline.",
-    createdAt: "Just now",
-    changes: [
-      `Produced ${result.requirements.length} requirements`,
-      `Generated ${result.architectureBlocks.length}-block architecture`,
-      `Selected ${result.bom.length} BOM items`,
-      `Flagged ${result.validations.length} validation issues`
-    ]
-  };
-
-  const updated: ProjectSummary = {
-    ...project,
-    status: "review",
-    updatedAt: "Updated just now",
-    outputs: {
-      requirements: result.requirements,
-      architecture: architectureSummary(result.architectureBlocks),
-      architectureBlocks: result.architectureBlocks,
-      bom: result.bom,
-      validations: result.validations,
-      exportReady: false
-    },
-    clarifyingQuestions: undefined,
-    clarifyingAnswers: effectiveAnswers,
-    revisions: [generationRevision, ...project.revisions]
-  };
-
-  storedProjects[projectIndex] = updated;
-  await writeStoredProjects(storedProjects);
-  return updated;
+    return updated;
+  });
 }
 
 interface CreateExportJobInput {
@@ -327,35 +396,31 @@ interface CreateExportJobInput {
 }
 
 export async function createExportJob(input: CreateExportJobInput) {
-  const storedProjects = await readStoredProjects();
-  const projectIndex = storedProjects.findIndex((p) => p.id === input.projectId);
-
-  if (projectIndex === -1) {
-    throw new Error(`Project not found: ${input.projectId}`);
-  }
-
-  const project = storedProjects[projectIndex];
-  const jobId = `export-${Date.now()}`;
-
-  const newJob = {
-    id: jobId,
-    projectId: input.projectId,
-    status: "pending" as const,
-    format: input.format,
-    createdAt: new Date().toISOString(),
-    logs: ["Initializing export job..."]
-  };
-
-  const updatedProject = {
-    ...project,
-    status: "exporting" as const,
-    exportJobs: [newJob, ...(project.exportJobs ?? [])]
-  };
-
-  storedProjects[projectIndex] = updatedProject;
-  await writeStoredProjects(storedProjects);
-
-  return { job: newJob, project: updatedProject };
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const projectIndex = storedProjects.findIndex((p) => p.id === input.projectId);
+    if (projectIndex === -1) {
+      throw new Error(`Project not found: ${input.projectId}`);
+    }
+    const project = storedProjects[projectIndex];
+    const jobId = `export-${randomUUID()}`;
+    const newJob = {
+      id: jobId,
+      projectId: input.projectId,
+      status: "pending" as const,
+      format: input.format,
+      createdAt: new Date().toISOString(),
+      logs: ["Initializing export job..."]
+    };
+    const updatedProject = {
+      ...project,
+      status: "exporting" as const,
+      exportJobs: [newJob, ...(project.exportJobs ?? [])]
+    };
+    storedProjects[projectIndex] = updatedProject;
+    await writeStoredProjects(storedProjects);
+    return { job: newJob, project: updatedProject };
+  });
 }
 
 export async function getExportJob(projectId: string, jobId: string) {
@@ -375,7 +440,28 @@ function getExportsDir(): string {
 }
 
 export function getExportFilePath(jobId: string): string {
-  return path.join(getExportsDir(), `${jobId}.zip`);
+  // Defence-in-depth: guarantee the resolved path stays inside the
+  // exports directory regardless of what the caller passes. This
+  // protects against future misuse where an unvalidated jobId flows
+  // into this function — the regex guard in the API route is a first
+  // line, this is the second.
+  const exportsDir = path.resolve(getExportsDir());
+  const candidate = path.resolve(path.join(exportsDir, `${jobId}.zip`));
+  if (candidate !== exportsDir && !candidate.startsWith(exportsDir + path.sep)) {
+    throw new Error(`Invalid export jobId (escapes exports dir): ${jobId}`);
+  }
+  return candidate;
+}
+
+/**
+ * Strip filesystem + environment paths from error messages before they
+ * reach the client. Prevents leakage of install paths, cwd, tmpdir, etc.
+ */
+function sanitizeErrorMessage(message: string): string {
+  return message
+    .replace(/(^|\s)\/[A-Za-z0-9_\-./]+/g, "$1[path]")
+    .replace(/[A-Za-z]:\\[A-Za-z0-9_\-\\.]+/g, "[path]")
+    .slice(0, 300);
 }
 
 /**
@@ -423,36 +509,38 @@ async function gcOldExports(
  * the job record so the UI can surface them without crashing the page.
  */
 export async function runExportJob(projectId: string, jobId: string) {
-  const storedProjects = await readStoredProjects();
-  const projectIndex = storedProjects.findIndex((p) => p.id === projectId);
-  if (projectIndex === -1) {
-    throw new Error(`Project not found: ${projectId}`);
-  }
+  // Phase 1 (locked): validate + mark running + GC old exports
+  const prelude = await withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const projectIndex = storedProjects.findIndex((p) => p.id === projectId);
+    if (projectIndex === -1) throw new Error(`Project not found: ${projectId}`);
+    const project = storedProjects[projectIndex];
+    const jobs = project.exportJobs ?? [];
+    const jobIndex = jobs.findIndex((j) => j.id === jobId);
+    if (jobIndex === -1) throw new Error(`Export job not found: ${jobId}`);
 
-  const project = storedProjects[projectIndex];
-  const jobs = project.exportJobs ?? [];
-  const jobIndex = jobs.findIndex((j) => j.id === jobId);
-  if (jobIndex === -1) {
-    throw new Error(`Export job not found: ${jobId}`);
-  }
+    const keepJobIds = await gcOldExports(projectId, 3, jobs);
+    const retainedJobs = jobs.filter(
+      (j) =>
+        j.id === jobId ||
+        j.status === "pending" ||
+        j.status === "running" ||
+        keepJobIds.has(j.id)
+    );
+    const retainedIndex = retainedJobs.findIndex((j) => j.id === jobId);
+    const runningLogs = [...retainedJobs[retainedIndex].logs, "Validating project outputs..."];
+    const runningJob = { ...retainedJobs[retainedIndex], status: "running" as const, logs: runningLogs };
+    retainedJobs[retainedIndex] = runningJob;
+    storedProjects[projectIndex] = { ...project, exportJobs: retainedJobs };
+    await writeStoredProjects(storedProjects);
+    return { project };
+  });
+  const { project } = prelude;
 
-  // GC old completed exports (keep latest 3 per project) BEFORE running
-  // the new one. This keeps disk bounded without throwing away the most
-  // recent history the user might still want to re-download.
-  const keepJobIds = await gcOldExports(projectId, 3, jobs);
-  const retainedJobs = jobs.filter(
-    (j) => j.id === jobId || j.status === "pending" || j.status === "running" || keepJobIds.has(j.id)
-  );
-
-  // Mark running
-  const retainedIndex = retainedJobs.findIndex((j) => j.id === jobId);
-  const runningLogs = [...retainedJobs[retainedIndex].logs, "Validating project outputs..."];
-  const runningJob = { ...retainedJobs[retainedIndex], status: "running" as const, logs: runningLogs };
-  const runningJobs = [...retainedJobs];
-  runningJobs[retainedIndex] = runningJob;
-  storedProjects[projectIndex] = { ...project, exportJobs: runningJobs };
-  await writeStoredProjects(storedProjects);
-
+  // Phase 2 (unlocked): the CPU/IO-heavy bundle build. Holding the lock
+  // here would block every other project operation for the duration.
+  let completedLogs: string[];
+  let failureMessage: string | null = null;
   try {
     const architectureBlocks = project.outputs.architectureBlocks;
     if (!architectureBlocks || architectureBlocks.length === 0) {
@@ -463,60 +551,70 @@ export async function runExportJob(projectId: string, jobId: string) {
     if (project.outputs.bom.length === 0) {
       throw new Error("Cannot export: BOM is empty.");
     }
-
-    const outPath = getExportFilePath(jobId);
     await buildKicadExport({
       projectName: project.name,
       bom: project.outputs.bom,
       architectureBlocks,
-      outPath
+      outPath: getExportFilePath(jobId)
     });
+    completedLogs = [
+      `Generated ${project.name}.kicad_pro, .kicad_sch, .kicad_sym`,
+      `Generated ${project.name}-netlist.xml and ${project.name}-bom.csv`,
+      "Packaged into zip and persisted to exports directory"
+    ];
+  } catch (error) {
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    failureMessage = sanitizeErrorMessage(rawMessage);
+    console.error(`[runExportJob] failed projectId=${projectId} jobId=${jobId}`, error);
+    completedLogs = [];
+  }
 
+  // Phase 3 (locked): write the final status. Guard every index lookup
+  // — in the time we held no lock, another request could have deleted
+  // the project or the job. If so, re-throw the original failure.
+  return withStoreLock(async () => {
     const latestStored = await readStoredProjects();
     const latestIndex = latestStored.findIndex((p) => p.id === projectId);
+    if (latestIndex === -1) {
+      // Project vanished. Best-effort cleanup of the orphan zip.
+      await fs.unlink(getExportFilePath(jobId)).catch(() => {});
+      if (failureMessage) throw new Error(failureMessage);
+      throw new Error("Project was deleted during export");
+    }
     const latestProject = latestStored[latestIndex];
     const latestJobs = latestProject.exportJobs ?? [];
     const latestJobIndex = latestJobs.findIndex((j) => j.id === jobId);
+    if (latestJobIndex === -1) {
+      if (failureMessage) throw new Error(failureMessage);
+      throw new Error("Export job was cancelled during run");
+    }
     const latestJob = latestJobs[latestJobIndex];
-    const completedJob = {
-      ...latestJob,
-      status: "completed" as const,
-      completedAt: new Date().toISOString(),
-      downloadUrl: `/api/exports/${jobId}/download`,
-      logs: [
-        ...latestJob.logs,
-        `Generated ${project.name}.kicad_pro, .kicad_sch, .kicad_sym`,
-        `Generated ${project.name}-netlist.xml and ${project.name}-bom.csv`,
-        "Packaged into zip and persisted to exports directory"
-      ]
-    };
-    latestJobs[latestJobIndex] = completedJob;
+
+    const finalJob = failureMessage
+      ? {
+          ...latestJob,
+          status: "failed" as const,
+          error: failureMessage,
+          logs: [...latestJob.logs, `Export failed: ${failureMessage}`]
+        }
+      : {
+          ...latestJob,
+          status: "completed" as const,
+          completedAt: new Date().toISOString(),
+          downloadUrl: `/api/exports/${jobId}/download`,
+          logs: [...latestJob.logs, ...completedLogs]
+        };
+
+    const updatedJobs = [...latestJobs];
+    updatedJobs[latestJobIndex] = finalJob;
     latestStored[latestIndex] = {
       ...latestProject,
-      status: "exported" as const,
-      exportJobs: latestJobs
+      status: failureMessage ? latestProject.status : ("exported" as const),
+      exportJobs: updatedJobs
     };
     await writeStoredProjects(latestStored);
-    return completedJob;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const latestStored = await readStoredProjects();
-    const latestIndex = latestStored.findIndex((p) => p.id === projectId);
-    const latestProject = latestStored[latestIndex];
-    const latestJobs = latestProject.exportJobs ?? [];
-    const latestJobIndex = latestJobs.findIndex((j) => j.id === jobId);
-    const latestJob = latestJobs[latestJobIndex];
-    const failedJob = {
-      ...latestJob,
-      status: "failed" as const,
-      error: message,
-      logs: [...latestJob.logs, `Export failed: ${message}`]
-    };
-    latestJobs[latestJobIndex] = failedJob;
-    latestStored[latestIndex] = { ...latestProject, exportJobs: latestJobs };
-    await writeStoredProjects(latestStored);
-    return failedJob;
-  }
+    return finalJob;
+  });
 }
 
 export { splitListValue, slugify };

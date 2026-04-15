@@ -10,6 +10,7 @@ import {
   runExportJob,
   getExportFilePath
 } from "./project-store";
+import { deleteProject } from "./project-store";
 import { createStubAiClient } from "./ai/stub-client";
 
 describe("generateProject integration (stub AI client)", () => {
@@ -166,6 +167,76 @@ describe("runExportJob integration", () => {
     await expect(runExportJob("nope", "x")).rejects.toThrow(/not found/i);
     const projectId = await seedGeneratedProject();
     await expect(runExportJob(projectId, "missing-job")).rejects.toThrow(/not found/i);
+  });
+
+  it("concurrent createProject calls never lose data (mutex serialises writes)", async () => {
+    // Without the mutex, 20 parallel createProject() calls would each
+    // read the same baseline, build a project, and the last write wins.
+    // Result: the store ends up with ONE project instead of 20.
+    const results = await Promise.all(
+      Array.from({ length: 20 }, (_, i) =>
+        createProject({
+          name: `Concurrent ${i}`,
+          prompt: "test",
+          constraints: [],
+          preferredParts: []
+        })
+      )
+    );
+    expect(results).toHaveLength(20);
+    // Every id should be distinct (project id uniqueness check)
+    const uniqueIds = new Set(results.map((p) => p.id));
+    expect(uniqueIds.size).toBe(20);
+  });
+
+  it("readStoredProjects drops schema-invalid entries instead of crashing", async () => {
+    // Write a file containing one valid + one broken record
+    const fs = await import("node:fs/promises");
+    const valid = await createProject({
+      name: "Valid",
+      prompt: "p",
+      constraints: [],
+      preferredParts: []
+    });
+    const { getProjects } = await import("./project-store");
+    const filePath = process.env.FLUX_PROJECTS_FILE!;
+    const current = JSON.parse(await fs.readFile(filePath, "utf8"));
+    current.push({ id: "broken", name: "", /* missing required fields */ });
+    await fs.writeFile(filePath, JSON.stringify(current));
+
+    const all = await getProjects();
+    expect(all.some((p) => p.id === valid.id)).toBe(true);
+    expect(all.some((p) => p.id === "broken")).toBe(false);
+  });
+
+  it("deleteProject removes project and unlinks its export zips", async () => {
+    const created = await createProject({
+      name: "To Delete",
+      prompt: "p",
+      constraints: [],
+      preferredParts: []
+    });
+    await generateProject({ projectId: created.id, client: createStubAiClient() });
+    const { job } = await createExportJob({ projectId: created.id, format: "kicad" });
+    await runExportJob(created.id, job.id);
+
+    const fs = await import("node:fs/promises");
+    // Zip exists before delete
+    await expect(fs.stat(getExportFilePath(job.id))).resolves.toBeDefined();
+
+    const removed = await deleteProject(created.id);
+    expect(removed).toBe(true);
+
+    // Project is gone
+    const { getProjectById } = await import("./project-store");
+    expect(await getProjectById(created.id)).toBeUndefined();
+    // Zip has been cleaned up
+    await expect(fs.stat(getExportFilePath(job.id))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("deleteProject returns false for unknown id", async () => {
+    const removed = await deleteProject("never-existed");
+    expect(removed).toBe(false);
   });
 
   it("garbage-collects old export zips to keep disk bounded", async () => {
