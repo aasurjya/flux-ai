@@ -1,0 +1,9 @@
+{
+  "maxCostUSD": 50,
+  "maxWallClockHours": 12,
+  "maxCyclesPerSession": null,
+  "minCoveragePercent": 80,
+  "stopOnBlocked": true,
+  "enableStopGate": false,
+  "notes": "Budget + gate flags for the autonomous JARVIS loop. Set enableStopGate=true to activate the blocking Stop hook (it will refuse to end sessions until tests/build/coverage/e2e all pass). Defaults to false so early sessions can stop cleanly while Phase 4/5 coverage is still being built up."
+}

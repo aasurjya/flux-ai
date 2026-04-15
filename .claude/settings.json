@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/ihub-devs/PROJECTS/WEB-APPS/flux.ai/.claude/hooks/jarvis-stop-gate.js",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
