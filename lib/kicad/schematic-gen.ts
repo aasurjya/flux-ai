@@ -1,5 +1,6 @@
 import type { BomItem, CircuitBlock } from "@/types/project";
 import { atom, node, str, serialize, SExp } from "./sexp";
+import { mapToStdSymbol } from "./symbol-map";
 
 const VERSION = 20231120;
 const GENERATOR = "flux_ai";
@@ -84,7 +85,10 @@ function placedSymbolNode(
   y: number,
   seed: string
 ): SExp {
-  const libId = `${libName}:${item.designator}`;
+  // Prefer a KiCad standard-library symbol (Device:R, Connector:USB_C_...)
+  // when one exists — the user gets a real, pinned symbol. Fall back to
+  // the project-local placeholder for ICs / custom parts.
+  const libId = mapToStdSymbol(item) ?? `${libName}:${item.designator}`;
   return node(
     "symbol",
     node("lib_id", str(libId)),
@@ -123,7 +127,14 @@ export function generateSchematic(input: GenerateSchematicInput): string {
   const { projectName, libName, bom } = input;
   const today = new Date().toISOString().slice(0, 10);
 
-  const libSymbols = node("lib_symbols", ...bom.map((item) => libSymbolNode(libName, item)));
+  // Only inline lib_symbols for items that aren't covered by the KiCad
+  // standard library. Stdlib-referenced parts (passives, USB-C, etc.)
+  // load from KiCad's shipped libraries automatically.
+  const customBom = bom.filter((item) => mapToStdSymbol(item) === null);
+  const libSymbols = node(
+    "lib_symbols",
+    ...customBom.map((item) => libSymbolNode(libName, item))
+  );
 
   // Simple grid: 4 columns, 25.4mm spacing, starting at (25.4, 25.4)
   const COLS = 4;

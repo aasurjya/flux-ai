@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { AiWorkflowStages } from "@/components/ai-workflow-stages";
+import { CircuitGraph } from "@/components/circuit-graph";
 import { ExportJobCard } from "@/components/export-job-card";
 import { getProjectById, addRevision, generateProject, createExportJob, runExportJob } from "@/lib/project-store";
 import { AnswerQuestionsForm } from "./answer-questions-form";
@@ -158,14 +159,18 @@ export default async function ProjectWorkspacePage({ params }: { params: Promise
             <Card className="border-border/60 bg-card/60">
               <CardHeader>
                 <CardTitle>Architecture blocks</CardTitle>
-                <CardDescription>First-pass planning before detailed schematic generation.</CardDescription>
+                <CardDescription>Block-level view of signal and power flow. Drag the graph horizontally if it extends off-screen.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                {currentProject.outputs.architecture.map((item) => (
-                  <div key={item} className="rounded-xl border border-border/70 bg-background/30 p-4">
-                    {item}
-                  </div>
-                ))}
+              <CardContent className="space-y-4 text-sm text-muted-foreground">
+                {currentProject.outputs.architectureBlocks && currentProject.outputs.architectureBlocks.length > 0 ? (
+                  <CircuitGraph blocks={currentProject.outputs.architectureBlocks} />
+                ) : (
+                  currentProject.outputs.architecture.map((item) => (
+                    <div key={item} className="rounded-xl border border-border/70 bg-background/30 p-4">
+                      {item}
+                    </div>
+                  ))
+                )}
               </CardContent>
             </Card>
 

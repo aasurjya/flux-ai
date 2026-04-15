@@ -4,6 +4,7 @@ import { clarifyRequirements } from "./clarify";
 import { generateArchitecture } from "./generate-architecture";
 import { suggestBom } from "./suggest-bom";
 import { validateDesign } from "./validate";
+import { runDesignRules } from "./design-rules";
 import type { BomItem, CircuitBlock, ValidationIssue } from "@/types/project";
 
 export interface GenerationInput {
@@ -79,12 +80,39 @@ export async function runGenerationPipeline(
     preferredParts: input.preferredParts
   });
 
-  const validations = await validateDesign(client, {
+  const llmValidations = await validateDesign(client, {
     architectureBlocks,
     bom,
     constraints: input.constraints,
     requirements
   });
 
+  // Deterministic rule checks run alongside the LLM validator so the
+  // pipeline catches universal hardware mistakes even when the LLM misses
+  // them (or when the stub is used). Rules are deduped against LLM
+  // output by (severity, title) pair.
+  const ruleIssues = runDesignRules({
+    requirements,
+    architectureBlocks,
+    bom,
+    constraints: input.constraints
+  });
+  const validations = mergeValidations(llmValidations, ruleIssues);
+
   return { kind: "complete", requirements, architectureBlocks, bom, validations };
+}
+
+function mergeValidations(
+  llm: ValidationIssue[],
+  rules: ValidationIssue[]
+): ValidationIssue[] {
+  const seen = new Set<string>();
+  const out: ValidationIssue[] = [];
+  for (const issue of [...rules, ...llm]) {
+    const key = `${issue.severity}::${issue.title.toLowerCase().trim()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(issue);
+  }
+  return out;
 }

@@ -1,5 +1,6 @@
 import type { BomItem } from "@/types/project";
 import { atom, node, str, serialize } from "./sexp";
+import { hasStdSymbol } from "./symbol-map";
 
 /**
  * Generate a minimal but valid KiCad symbol library (.kicad_sym) for a
@@ -73,16 +74,19 @@ export function generateSymbolLibrary(libName: string, bom: BomItem[]): string {
     throw new Error("generateSymbolLibrary: bom must be non-empty");
   }
 
+  // Only emit placeholder symbols for items that DON'T have a KiCad
+  // standard-library mapping. Passives (R/C/L/D/Q) and common connectors
+  // reference stdlib symbols directly from the schematic instead, which
+  // gives KiCad proper pins + drawing that we can't replicate here.
+  const customItems = bom.filter((item) => !hasStdSymbol(item));
+
   const lib = node(
     "kicad_symbol_lib",
     node("version", atom(VERSION)),
     node("generator", atom(GENERATOR)),
-    ...bom.map((item) => symbolNode(libName, item))
+    ...customItems.map((item) => symbolNode(libName, item))
   );
 
-  // KiCad expects a uuid on the top-level wrapper — not strictly required
-  // for .kicad_sym but we add a comment line for traceability via a
-  // harmless `(generator_version "..." ...)` line in a future revision.
   void pseudoUuid(libName); // reserved for future extension
 
   return serialize(lib, { pretty: true }) + "\n";
