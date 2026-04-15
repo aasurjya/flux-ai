@@ -1,0 +1,23 @@
+node_modules
+.next
+out
+.vercel
+.env
+.env.local
+.env.*.local
+.DS_Store
+
+# Runtime data (file-based persistence)
+data/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Coverage
+coverage/
+
+# JARVIS autonomous-run artifacts (kept out of source; regenerated per session)
+JARVIS_BLOCKED.md
