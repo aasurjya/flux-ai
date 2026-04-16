@@ -35,6 +35,13 @@ export interface ValidationIssue {
   severity: "info" | "warning" | "critical";
   title: string;
   detail: string;
+  /**
+   * User-recorded dismissal. Once set, design-rules will not re-fire
+   * this same issue on subsequent runs unless the underlying BOM or
+   * architecture changes (rule+title identity is the stability key).
+   * Optional for back-compat with existing projects.
+   */
+  dismissed?: { at: string; reason: string };
 }
 
 export interface BomItem {

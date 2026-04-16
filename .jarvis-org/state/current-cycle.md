@@ -1,7 +1,7 @@
 # Current cycle — flux.ai
 
-**Cycle:** 2 shipped → cycle 3 queued
-**Focus (cycle 3):** Phase 3 — dismiss validation issues
+**Cycle:** 3 shipped → cycle 4 queued
+**Focus (cycle 4):** Phase 4 — streaming generation via SSE
 
 ## Cycle 0 — bootstrap (2026-04-16) ✅
 
@@ -39,14 +39,32 @@
 **Outcome:** user flips BOM fields in <3s, every edit traceable via
 revision. Biggest pre-export friction eliminated.
 
-## Cycle 3 — scheduled
+## Cycle 3 — Phase 3 shipped (2026-04-16) ✅
 
-**Goal:** Phase 3 — dismiss validation issues.
-**Entry criteria:** Cycle 2 committed; green gates.
-**Rationale:** Currently the validator panel shouts the same warnings
-every improve-design cycle. Users with known trade-offs ("no ESD —
-dev board") can't silence them, so they start ignoring the whole
-panel — and real issues get lost in the noise.
+**Goal:** Let users silence known trade-offs on the validator panel.
+
+- [x] Schema: optional `dismissed?: { at, reason }` on ValidationIssue (back-compat)
+- [x] `setValidationDismissal` in store — reason:null re-enables
+- [x] `carryDismissalsForward` helper + 5 unit tests (id match first, (severity,title) fallback)
+- [x] `runImproveDesign` + `generateProject` carry forward dismissals across LLM re-runs
+- [x] DismissValidationForm client component (two-step: × → reason → submit)
+- [x] ReenableValidationForm client component (one-click)
+- [x] Page.tsx: server actions + active/dismissed split with collapsed `<details>`
+- [x] E2E: 2 new tests (dismiss with reason → re-enable; cancel/empty flow)
+- [x] Full regression: 209 unit + 40 E2E green, build exit 0
+- [x] Org-memory updated (R13 — Form action return type, R14 — carry user state across LLM re-runs)
+
+**Outcome:** "No ESD on USB-C — it's a dev board" stays dismissed across
+generate AND improve cycles. Signal-to-noise of the validation panel
+restored.
+
+## Cycle 4 — scheduled
+
+**Goal:** Phase 4 — streaming generation via SSE.
+**Entry criteria:** Cycle 3 committed; green gates.
+**Rationale:** 5-stage AI pipeline takes ~30s with a single generic
+spinner. Users don't know if it's working or stuck. Ship SSE so
+"Parsing requirements ✓ / Extracting architecture…" narrates progress.
 
 ## Cycle log
 
@@ -55,3 +73,4 @@ Each run of `/jarvis-cycle` appends here.
 - Cycle 0: bootstrap (agents + state + command) — 2026-04-16
 - Cycle 1: Phase 1 (KiCad wires) shipped — 2026-04-16 (f26c3f1)
 - Cycle 2: Phase 2 (inline BOM editing) shipped — 2026-04-16 (3f01c29)
+- Cycle 3: Phase 3 (dismiss validations) shipped — 2026-04-16 (pending commit)

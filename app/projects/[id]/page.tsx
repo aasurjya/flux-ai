@@ -11,8 +11,10 @@ import { CircuitGraph } from "@/components/circuit-graph";
 import { ExportJobCard } from "@/components/export-job-card";
 import { RevisionCompare } from "@/components/revision-compare";
 import { BomEditorRow } from "./bom-editor-row";
+import { DismissValidationForm } from "./dismiss-validation-form";
+import { ReenableValidationForm } from "./reenable-validation-form";
 import { formatRelative } from "@/lib/format-relative";
-import { getProjectById, generateProject, createExportJob, runExportJob, runImproveDesign } from "@/lib/project-store";
+import { getProjectById, generateProject, createExportJob, runExportJob, runImproveDesign, setValidationDismissal } from "@/lib/project-store";
 import { AnswerQuestionsForm } from "./answer-questions-form";
 
 async function improveDesignAction(formData: FormData) {
@@ -77,6 +79,34 @@ async function exportAction(formData: FormData) {
   const { job } = await createExportJob({ projectId, format: "kicad" });
   await runExportJob(projectId, job.id);
   revalidatePath(`/projects/${projectId}`);
+}
+
+async function dismissValidationAction(formData: FormData): Promise<{ error?: string } | void> {
+  "use server";
+  const projectId = String(formData.get("projectId") ?? "");
+  const validationId = String(formData.get("validationId") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (!projectId || !validationId) return { error: "Missing project or validation id" };
+  if (!reason) return { error: "A reason is required to dismiss a validation" };
+  try {
+    await setValidationDismissal({ projectId, validationId, reason });
+    revalidatePath(`/projects/${projectId}`);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Dismiss failed" };
+  }
+}
+
+async function reenableValidationAction(formData: FormData): Promise<{ error?: string } | void> {
+  "use server";
+  const projectId = String(formData.get("projectId") ?? "");
+  const validationId = String(formData.get("validationId") ?? "");
+  if (!projectId || !validationId) return { error: "Missing project or validation id" };
+  try {
+    await setValidationDismissal({ projectId, validationId, reason: null });
+    revalidatePath(`/projects/${projectId}`);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Re-enable failed" };
+  }
 }
 
 export default async function ProjectWorkspacePage({
@@ -358,20 +388,74 @@ export default async function ProjectWorkspacePage({
             <Card className="border-border/60 bg-card/60">
               <CardHeader>
                 <CardTitle>Validation issues</CardTitle>
-                <CardDescription>Warnings should remain visible until the user resolves or accepts them.</CardDescription>
+                <CardDescription>
+                  Dismiss known trade-offs (requires a reason); dismissed items
+                  stay dismissed across generate + improve cycles.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {currentProject.outputs.validations.map((issue) => (
-                  <div key={issue.id} className="rounded-xl border border-border/70 bg-background/30 p-4">
-                    <div className="mb-2 flex items-center justify-between gap-4">
-                      <p className="font-medium text-foreground">{issue.title}</p>
-                      <Badge variant={issue.severity === "critical" ? "critical" : issue.severity === "warning" ? "warning" : "secondary"}>
-                        {issue.severity}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{issue.detail}</p>
-                  </div>
-                ))}
+                {(() => {
+                  const active = currentProject.outputs.validations.filter((v) => !v.dismissed);
+                  const dismissed = currentProject.outputs.validations.filter((v) => !!v.dismissed);
+                  return (
+                    <>
+                      {active.length === 0 && dismissed.length === 0 && (
+                        <p className="text-sm text-muted-foreground">No validation issues.</p>
+                      )}
+                      {active.map((issue) => (
+                        <div key={issue.id} className="rounded-xl border border-border/70 bg-background/30 p-4">
+                          <div className="mb-2 flex items-start justify-between gap-4">
+                            <p className="font-medium text-foreground break-words min-w-0">{issue.title}</p>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <Badge variant={issue.severity === "critical" ? "critical" : issue.severity === "warning" ? "warning" : "secondary"}>
+                                {issue.severity}
+                              </Badge>
+                              <DismissValidationForm
+                                projectId={currentProject.id}
+                                validationId={issue.id}
+                                validationTitle={issue.title}
+                                action={dismissValidationAction}
+                              />
+                            </div>
+                          </div>
+                          <p className="text-sm text-muted-foreground break-words">{issue.detail}</p>
+                        </div>
+                      ))}
+                      {dismissed.length > 0 && (
+                        <details className="group rounded-xl border border-border/60 bg-background/20 p-3">
+                          <summary className="cursor-pointer text-sm font-medium text-muted-foreground">
+                            Dismissed ({dismissed.length})
+                          </summary>
+                          <div className="mt-3 space-y-2">
+                            {dismissed.map((issue) => (
+                              <div
+                                key={issue.id}
+                                className="rounded-lg border border-border/50 bg-background/20 p-3"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="break-words text-sm font-medium text-muted-foreground line-through">
+                                      {issue.title}
+                                    </p>
+                                    <p className="mt-1 break-words text-xs text-muted-foreground">
+                                      Reason: {issue.dismissed!.reason}
+                                    </p>
+                                  </div>
+                                  <ReenableValidationForm
+                                    projectId={currentProject.id}
+                                    validationId={issue.id}
+                                    validationTitle={issue.title}
+                                    action={reenableValidationAction}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  );
+                })()}
               </CardContent>
             </Card>
 

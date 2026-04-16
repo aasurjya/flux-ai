@@ -11,6 +11,7 @@ import { runGenerationPipeline } from "@/lib/ai/pipeline";
 import { architectureSummary } from "@/lib/ai/generate-architecture";
 import { improveDesign } from "@/lib/ai/improve-design";
 import { runDesignRules } from "@/lib/ai/design-rules";
+import { carryDismissalsForward } from "@/lib/ai/carry-dismissals";
 import { buildKicadExport } from "@/lib/kicad/bundle";
 
 /**
@@ -247,6 +248,78 @@ export async function createProject(input: CreateProjectInput) {
  * Creates a revision explaining the edit, with a snapshot for the
  * compare view.
  */
+/**
+ * Dismiss / re-enable a validation issue. Dismissal is a user-recorded
+ * accept of a known trade-off ("no ESD — it's a dev board"). Once
+ * dismissed, the deterministic design-rules engine won't re-fire the
+ * same rule+title on subsequent runs (carry-dismissals.ts matches by
+ * id + (severity, title) fallback). Creates a revision for traceability.
+ *
+ * reason: null → re-enable (remove dismissal).
+ */
+export async function setValidationDismissal(input: {
+  projectId: string;
+  validationId: string;
+  reason: string | null;
+}): Promise<ProjectSummary> {
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const projectIndex = storedProjects.findIndex((p) => p.id === input.projectId);
+    if (projectIndex === -1) {
+      throw new Error(`Project not found: ${input.projectId}`);
+    }
+    const project = storedProjects[projectIndex];
+    const idx = project.outputs.validations.findIndex((v) => v.id === input.validationId);
+    if (idx === -1) {
+      throw new Error(`Validation not found: ${input.validationId}`);
+    }
+    const before = project.outputs.validations[idx];
+    const after =
+      input.reason === null
+        ? { ...before, dismissed: undefined }
+        : {
+            ...before,
+            dismissed: {
+              at: new Date().toISOString(),
+              reason: input.reason.trim().slice(0, 400)
+            }
+          };
+    const nextValidations = [...project.outputs.validations];
+    nextValidations[idx] = after;
+
+    const changes =
+      input.reason === null
+        ? [`Re-enabled validation: "${before.title}"`]
+        : [`Dismissed validation "${before.title}" — reason: ${input.reason.trim()}`];
+
+    const revision = {
+      id: `rev-${randomUUID()}`,
+      title:
+        input.reason === null
+          ? `Re-enabled ${before.severity}: ${before.title.slice(0, 60)}`
+          : `Dismissed ${before.severity}: ${before.title.slice(0, 60)}`,
+      description: changes[0],
+      createdAt: new Date().toISOString(),
+      changes,
+      snapshot: {
+        bom: project.outputs.bom,
+        validations: nextValidations,
+        architectureBlocks: project.outputs.architectureBlocks
+      }
+    };
+
+    const updated: ProjectSummary = {
+      ...project,
+      updatedAt: new Date().toISOString(),
+      outputs: { ...project.outputs, validations: nextValidations },
+      revisions: [revision, ...project.revisions]
+    };
+    storedProjects[projectIndex] = updated;
+    await writeStoredProjects(storedProjects);
+    return updated;
+  });
+}
+
 export async function patchBomItem(input: {
   projectId: string;
   designator: string;
@@ -495,7 +568,13 @@ export async function runImproveDesign({
   const keptLlmValidations = project.outputs.validations.filter(
     (v) => !oldRuleIds.has(v.id)
   );
-  const nextValidations = [...nextRules, ...keptLlmValidations];
+  // Carry user dismissals forward so re-running rules doesn't
+  // resurrect issues the user already accepted as known trade-offs.
+  const carriedRules = carryDismissalsForward(
+    nextRules,
+    project.outputs.validations
+  );
+  const nextValidations = [...carriedRules, ...keptLlmValidations];
 
   // Phase 3 (locked): persist
   return withStoreLock(async () => {
@@ -611,12 +690,19 @@ export async function generateProject({
       return paused;
     }
 
+    // Carry user dismissals from the prior validations forward — running
+    // Generate a second time should not resurrect warnings the user
+    // already accepted. Matches by id and by (severity, title) fallback.
+    const carriedValidations = carryDismissalsForward(
+      result.validations,
+      currentProject.outputs.validations
+    );
     const newOutputs = {
       requirements: result.requirements,
       architecture: architectureSummary(result.architectureBlocks),
       architectureBlocks: result.architectureBlocks,
       bom: result.bom,
-      validations: result.validations,
+      validations: carriedValidations,
       exportReady: false
     };
     const generationRevision = {

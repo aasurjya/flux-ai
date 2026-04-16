@@ -118,3 +118,46 @@ audit is gone.
 ### Next cycle (Cycle 3) direction
 Phase 3 — dismiss validation issues. Users need to silence known
 trade-offs or the validator panel becomes ignored noise.
+
+---
+
+## 2026-04-16 — Cycle 3 closing review
+
+### What shipped
+Phase 3 — dismiss validation issues + rule respects dismissed state.
+
+Files:
+- `types/project.ts` — `ValidationIssue.dismissed?: { at; reason }` (back-compat optional).
+- `lib/project-schema.ts` — `dismissed` on `ValidationIssueSchema`.
+- `lib/ai/carry-dismissals.ts` + tests — pure helper matches prior dismissals by id first, then (severity, title) fallback. 5 tests.
+- `lib/project-store.ts` — new `setValidationDismissal({ projectId, validationId, reason })`. `reason: null` re-enables. `runImproveDesign` + `generateProject` now call `carryDismissalsForward(next, prior)` so dismissals survive re-runs of the LLM.
+- `app/projects/[id]/dismiss-validation-form.tsx` — two-step dismiss: × reveals reason textarea, submit creates revision with the reason. Empty reason disables submit.
+- `app/projects/[id]/reenable-validation-form.tsx` — one-click re-enable (wrapped action matches React `<form>` void signature).
+- `app/projects/[id]/page.tsx` — server actions `dismissValidationAction` + `reenableValidationAction`. Validation card split: active (with × buttons) + collapsed `<details>` "Dismissed (N)" with reason + re-enable buttons.
+- `e2e/dismiss-validation.spec.ts` — 2 new tests (dismiss → reason required → re-enable; cancel/empty flow).
+
+### Gate outcomes
+- Unit: 209 / 209 green (+5). Was 204.
+- E2E: 40 / 40 green (+2). Was 38.
+- Build: exit 0.
+- Coverage: thresholds hold.
+
+### Did it move a KPI?
+Phase 8 still not shipped, so direct telemetry absent. Qualitative:
+the "same ignored warning on every generate" friction is gone. Users
+can mark "No ESD — dev board" and it STAYS dismissed across generate
+and improve cycles (carryDismissalsForward verified by unit tests).
+
+### Org-memory updates
+- **R13** — Client-side server-action wrappers need a `Promise<void>` return type. React's `<form action>` signature won't accept `Promise<{ error? } | void>` directly. Wrap the action with a thin `async (fd) => { await action(fd); }` adapter when the server action needs to return an error object to a parent client component.
+- **R14** — User-state fields (dismissals, user edits) must be carried forward across LLM re-runs. Re-runs produce fresh arrays; without a carryForward merge, every generate resets the user's work. Match first by stable id, fall back to (severity, title) tuple for items LLM regenerates with a new id.
+
+### Next cycle (Cycle 4) direction
+Phase 4 — streaming generation via SSE. Users currently wait ~30s
+with a generic spinner; the 5-stage pipeline should narrate progress
+("Parsing requirements ✓ / Extracting architecture…"). Product-intel
+identified this as #3 pre-export friction after BOM editing and
+dismissals.
+
+Deferred again: Phase 5 (SQLite). Still zero users; still no
+concurrency pressure. Revisit when second real user appears.

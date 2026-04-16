@@ -54,7 +54,13 @@ const ValidationIssueSchema = z.object({
   id: z.string().min(1).max(ID_MAX),
   severity: z.enum(["info", "warning", "critical"]),
   title: safeStr(1, TITLE_MAX),
-  detail: safeStr(1, DETAIL_MAX)
+  detail: safeStr(1, DETAIL_MAX),
+  dismissed: z
+    .object({
+      at: z.string().min(1).max(40),
+      reason: safeStr(1, 400)
+    })
+    .optional()
 });
 
 const BomItemSchema = z.object({

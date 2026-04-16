@@ -87,6 +87,26 @@ URL is the identity source of truth; the body never rewrites it.
 Test-case required: payload attempts to change an identity field, row
 retains original value.
 
+### R13 — Client-side `<form action>` needs `Promise<void>` signature
+**Source:** Org Cycle 3, reenable-validation-form.tsx build error.
+**Rule:** React's `<form action={...}>` prop only accepts
+`(fd: FormData) => void | Promise<void>`. A server action that returns
+`Promise<{ error?: string } | void>` (so the parent can surface errors
+in a client UI) will TypeScript-reject when wired directly. Wrap with
+`async (fd) => { await action(fd); }` in the client component that owns
+the submit UX. Keep the raw server action available when the caller
+DOES want the error object (e.g., an inline error paragraph).
+
+### R14 — Carry user state forward across LLM re-runs
+**Source:** Org Cycle 3 — implementing dismiss-validation for Phase 3.
+**Rule:** Anything the USER manually set on AI-produced output
+(dismissals, manual BOM edits in the future, pinned notes) must be
+explicitly merged back into the freshly-regenerated output, because
+the LLM produces new arrays with new ids each run and the user's state
+is otherwise lost. Match strategy: prefer stable id; fall back to
+content-shape tuple like `(severity, title)` for items whose id the
+LLM regenerates. Test both the id-match path AND the fallback path.
+
 ## Failed experiments (do not repeat)
 
 ### F1 — Mock-project deletion
