@@ -144,6 +144,17 @@ the three cases explicitly: omitted → keep, null → delete, string →
 set. Don't collapse them or the user can't clear a field without
 breaking back-compat on nullable clients.
 
+### R19 — Silent-skip on identity collision hides real signal
+**Source:** Org Cycle 6 — improve-design replacement support.
+**Rule:** If two writes claim the same stable identity key
+(designator, primary key, slug), the correct responses are: merge /
+replace, reject with a 400 error, or route to disambiguation. Never
+default to "drop the second one quietly" — from the user's
+perspective this becomes "nothing happens when I click the button",
+the worst possible failure mode. If unsure, prefer replace + record
+exactly what changed; the user can always undo from the revision
+history.
+
 ## Failed experiments (do not repeat)
 
 ### F1 — Mock-project deletion

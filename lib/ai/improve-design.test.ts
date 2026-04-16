@@ -76,17 +76,17 @@ describe("improveDesign", () => {
     expect(result.nextBom.find((b) => b.designator === "U1")).toBeUndefined();
   });
 
-  it("ignores additions whose designator collides with existing BOM (keeps original)", async () => {
+  it("replaces an existing BOM row when the AI re-uses a designator with a different name/value", async () => {
     const callStructured = vi.fn().mockResolvedValue({
-      summary: "Attempt to re-add U1",
+      summary: "Swap U1 for a better MCU",
       bomAdditions: [
         {
           designator: "U1",
-          name: "Different MCU",
-          package: "QFN",
+          name: "ESP32-C6 (better radio)",
+          package: "Module",
           quantity: 1,
           status: "selected",
-          rationale: "should not override"
+          rationale: "Upgraded for Wi-Fi 6 support"
         }
       ],
       bomRemovals: []
@@ -101,9 +101,48 @@ describe("improveDesign", () => {
       constraints: []
     });
 
-    // The original U1 is still ESP32-S3, not the duplicate
+    // U1 now points to the new name — the row was replaced, not duplicated
+    const u1 = result.nextBom.find((b) => b.designator === "U1");
+    expect(u1?.name).toBe("ESP32-C6 (better radio)");
+    // Exactly one row with that designator (no duplicate)
+    expect(result.nextBom.filter((b) => b.designator === "U1")).toHaveLength(1);
+    // Revision carries a single "Replaced" line (not separate add+remove)
+    expect(result.changes.some((c) => /^Replaced U1:/.test(c))).toBe(true);
+    expect(result.changes.some((c) => c.includes("ESP32-S3"))).toBe(true);
+    expect(result.changes.some((c) => c.includes("ESP32-C6"))).toBe(true);
+  });
+
+  it("silently skips an addition identical to the existing row (true no-op)", async () => {
+    const callStructured = vi.fn().mockResolvedValue({
+      summary: "Attempt to re-add U1 unchanged",
+      bomAdditions: [
+        {
+          designator: "U1",
+          name: "ESP32-S3", // same as baseBom
+          package: "Module", // same
+          quantity: 1, // same
+          status: "selected", // same
+          rationale: "redundant"
+        }
+      ],
+      bomRemovals: []
+    });
+
+    const result = await improveDesign(mockClient(callStructured), {
+      prompt: "p",
+      requirements: ["r"],
+      architectureBlocks: baseBlocks,
+      bom: baseBom,
+      validations: [],
+      constraints: []
+    });
+
+    // BOM unchanged — same length, same U1
+    expect(result.nextBom).toHaveLength(baseBom.length);
     const u1 = result.nextBom.find((b) => b.designator === "U1");
     expect(u1?.name).toBe("ESP32-S3");
+    // No "Replaced" or "Added" entry for U1
+    expect(result.changes.some((c) => /U1/.test(c))).toBe(false);
   });
 
   it("produces one change entry per applied addition/removal with the AI rationale", async () => {

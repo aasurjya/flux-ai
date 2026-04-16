@@ -298,3 +298,52 @@ replacement can be detected: same designator + different
 name/value/mpn → remove old + add new + record "Replaced U3: X → Y".
 
 Deferring Phase 5 (SQLite) YET AGAIN — still no concurrency pressure.
+
+---
+
+## 2026-04-16 — Cycle 6 closing review
+
+### What shipped
+Phase 7 — improve-design replacement support.
+
+Files:
+- `lib/ai/improve-design.ts` — `applyBomEdits` rewritten. Same
+  designator + any differing field (name, value, mpn, quantity,
+  package, status) = REPLACEMENT. Swap in place, preserve the stable
+  `id`, record a single `Replaced U1: X → Y — {rationale}` entry.
+  Identical re-assertion (all fields match) is silently skipped (true
+  no-op). SYSTEM_PROMPT now tells the LLM the mechanism exists so it
+  proposes swaps naturally.
+- `lib/ai/improve-design.test.ts` — previous collision-skip test
+  upgraded to the new "replacement works" semantics. Added a second
+  test asserting identical re-assertion is a no-op (no revision
+  entry). 6 total tests green.
+
+### Gate outcomes
+- Unit: 223 / 223 green (+1). Was 222.
+- E2E: 42 / 42 green. Unchanged.
+- Build: exit 0.
+- Coverage: thresholds hold.
+
+### Did it move a KPI?
+Qualitative only — until Phase 8 telemetry, we can't measure how
+often improve-design proposes replacements vs pure additions. But
+the failure mode ("Improve design doesn't change U3 even though it
+obviously should have") is eliminated.
+
+### Org-memory updates
+- **R19** — Silent-skip on collision is almost always a bug. If two
+  sources claim the same identity key, the correct behavior is one
+  of: merge (replace), reject (400), or route (disambiguate). Never
+  default to "drop the second one quietly" — that hides real signal
+  from the user. When in doubt, replace and record what changed.
+
+### Next cycle (Cycle 7) direction
+Phase 8 — telemetry counters + `/admin/stats` gated view. Without
+this, every other improvement is untestable in production. Six
+phases shipped without telemetry is the limit; the next new feature
+has to measure itself. Gated behind a `FLUX_ADMIN_TOKEN` env var so
+the counters don't leak to unauthenticated users.
+
+Deferring Phase 5 (SQLite) forever-until-signal-arrives. Still zero
+production users.

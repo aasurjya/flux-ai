@@ -70,6 +70,11 @@ Rules:
 - Respect all constraints (layer count, SMD-only, cost ceiling).
 - Use "needs_review" status for items where your suggestion depends on info the brief doesn't provide.
 
+REPLACEMENT mechanism:
+- You may REPLACE an existing BOM row by emitting an ADDITION with its designator (e.g. U1) and a different name, value, package, mpn, quantity, or status. The pipeline recognises "same designator, different fields" as a swap and records it as "Replaced U1: old → new — {rationale}".
+- Use this when the better fix is changing an existing part (e.g. swapping an LDO for a buck regulator, upgrading an MCU) rather than adding alongside it.
+- Identical re-assertion (same designator, all fields identical) is silently skipped — don't use it to pad the response.
+
 Emit the improvements via the propose_design_improvements tool.`;
 
 function buildUserMessage(input: ImproveDesignInput): string {
@@ -122,16 +127,48 @@ function applyBomEdits(
     }
   }
 
-  const existingDesignators = new Set(afterRemoval.map((b) => b.designator));
-  const additionsToApply: BomItem[] = [];
+  // Mutable "current state" — replacements modify this in place so
+  // further iterations see the updated BOM.
+  let nextBom = [...afterRemoval];
+
   for (const add of additions) {
-    if (existingDesignators.has(add.designator)) {
-      // Collision — skip. The LLM shouldn't re-add a designator; ignore
-      // rather than silently overwrite the original.
+    const existingIdx = nextBom.findIndex((b) => b.designator === add.designator);
+    if (existingIdx >= 0) {
+      const existing = nextBom[existingIdx];
+      const isIdentical =
+        existing.name === add.name &&
+        existing.quantity === add.quantity &&
+        existing.package === add.package &&
+        existing.status === add.status &&
+        (existing.value ?? undefined) === (add.value ?? undefined) &&
+        (existing.mpn ?? undefined) === (add.mpn ?? undefined);
+      if (isIdentical) {
+        // True no-op — the LLM re-asserted the existing row. Silently skip.
+        continue;
+      }
+      // REPLACEMENT: same designator, differing fields. Swap in place,
+      // keep the stable id so references/revisions don't go stale.
+      const replaced: BomItem = {
+        ...existing,
+        name: add.name,
+        quantity: add.quantity,
+        package: add.package,
+        status: add.status,
+        value: add.value ?? undefined,
+        mpn: add.mpn ?? undefined
+      };
+      nextBom = [
+        ...nextBom.slice(0, existingIdx),
+        replaced,
+        ...nextBom.slice(existingIdx + 1)
+      ];
+      changes.push(
+        `Replaced ${add.designator}: ${existing.name} → ${add.name} — ${add.rationale}`
+      );
       continue;
     }
-    existingDesignators.add(add.designator);
-    additionsToApply.push({
+    // Fresh addition
+    const fresh: BomItem = {
       id: `bom-${add.designator.toLowerCase()}-${randomUUID().slice(0, 6)}`,
       designator: add.designator,
       name: add.name,
@@ -140,11 +177,12 @@ function applyBomEdits(
       status: add.status,
       ...(add.value ? { value: add.value } : {}),
       ...(add.mpn ? { mpn: add.mpn } : {})
-    });
+    };
+    nextBom = [...nextBom, fresh];
     changes.push(`Added ${add.designator} (${add.name}): ${add.rationale}`);
   }
 
-  return { nextBom: [...afterRemoval, ...additionsToApply], changes };
+  return { nextBom, changes };
 }
 
 export async function improveDesign(

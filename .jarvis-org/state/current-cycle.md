@@ -1,7 +1,7 @@
 # Current cycle — flux.ai
 
-**Cycle:** 5 shipped → cycle 6 queued
-**Focus (cycle 6):** Phase 7 — fix improve-design silent-skip (enable replacements)
+**Cycle:** 6 shipped → cycle 7 queued
+**Focus (cycle 7):** Phase 8 — telemetry counters + /admin/stats gated view
 
 ## Cycle 0 — bootstrap (2026-04-16) ✅
 
@@ -95,15 +95,31 @@ Generate instead of a blank "Generating..." button for 30s.
 passes DR-DECOUPLING via structured `value: "100nF"`, where the old
 regex would have missed it.
 
-## Cycle 6 — scheduled
+## Cycle 6 — Phase 7 shipped (2026-04-16) ✅
 
-**Goal:** Phase 7 — fix improve-design silent-skip (enable replacements).
-**Entry criteria:** Cycle 5 committed; green gates.
-**Rationale:** `applyBomEdits` silently drops an addition whose
-designator already exists. With Phase 6 structured fields landed,
-"same designator + different value" is now a reliable signal for a
-REPLACEMENT (swap old for new + record "Replaced U3: X → Y"). Unlocks
-real improve-design value beyond "add to BOM".
+**Goal:** Enable improve-design to propose replacements, not only additions.
+
+- [x] `applyBomEdits` treats same-designator collision as REPLACEMENT when any field differs
+- [x] Identical re-assertion (all fields match) is a true no-op (no revision entry)
+- [x] Stable `id` preserved across replacement so references don't break
+- [x] Revision records "Replaced U1: old → new — rationale" as a single line
+- [x] SYSTEM_PROMPT tells the LLM the mechanism exists
+- [x] 6 improve-design tests green (previous collision test upgraded + new no-op test)
+- [x] Full regression: 223 unit + 42 E2E green, build exit 0
+- [x] Org-memory: R19 (silent-skip on collision is a bug)
+
+**Outcome:** The LLM can now say "swap U1 for ESP32-C6" and the change
+actually lands. Before, same-designator additions were silently dropped.
+
+## Cycle 7 — scheduled
+
+**Goal:** Phase 8 — telemetry counters + `/admin/stats` gated view.
+**Entry criteria:** Cycle 6 committed; green gates.
+**Rationale:** Six phases shipped, zero measurement. Every KPI in
+`.jarvis-org/state/KPIs.md` is "unmeasured / qualitative only". The
+next new feature has to instrument itself, or we're building blind.
+File-based counter (no network), admin view gated behind
+`FLUX_ADMIN_TOKEN` so the counters don't leak to unauthenticated users.
 
 ## Cycle log
 
@@ -114,4 +130,5 @@ Each run of `/jarvis-cycle` appends here.
 - Cycle 2: Phase 2 (inline BOM editing) shipped — 2026-04-16 (3f01c29)
 - Cycle 3: Phase 3 (dismiss validations) shipped — 2026-04-16 (8567092)
 - Cycle 4: Phase 4 (SSE streaming) shipped — 2026-04-16 (5bb68e8)
-- Cycle 5: Phase 6 (structured BOM fields) shipped — 2026-04-16 (pending commit)
+- Cycle 5: Phase 6 (structured BOM fields) shipped — 2026-04-16 (954b0e3)
+- Cycle 6: Phase 7 (improve-design replacements) shipped — 2026-04-16 (pending commit)
