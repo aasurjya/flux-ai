@@ -1,4 +1,5 @@
 import { readCounters } from "@/lib/telemetry";
+import { isTokenValid } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 
@@ -17,8 +18,8 @@ export default async function AdminStatsPage({
   searchParams: Promise<{ token?: string }>;
 }) {
   const params = await searchParams;
-  const expected = process.env.FLUX_ADMIN_TOKEN;
-  if (!expected || params.token !== expected) {
+  const expected = process.env.FLUX_ADMIN_TOKEN ?? "";
+  if (!isTokenValid(params.token ?? "", expected)) {
     redirect("/");
   }
 
