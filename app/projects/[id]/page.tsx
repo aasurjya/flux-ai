@@ -9,6 +9,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { AiWorkflowStages } from "@/components/ai-workflow-stages";
 import { CircuitGraph } from "@/components/circuit-graph";
 import { ExportJobCard } from "@/components/export-job-card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { RevisionCompare } from "@/components/revision-compare";
 import { BomEditorRow } from "./bom-editor-row";
 import { DismissValidationForm } from "./dismiss-validation-form";
@@ -126,6 +127,7 @@ export default async function ProjectWorkspacePage({
   }
 
   const currentProject = project;
+  const isGenerating = currentProject.status === "generating";
 
   // Resolve the compare selection (if any) — both IDs must exist AND
   // both revisions must have snapshots, otherwise fall through silently.
@@ -233,9 +235,17 @@ export default async function ProjectWorkspacePage({
                 <CardDescription>Structured understanding extracted from the design brief.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-sm text-muted-foreground">
-                {currentProject.outputs.requirements.map((item) => (
-                  <p key={item}>- {item}</p>
-                ))}
+                {isGenerating ? (
+                  <>
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-5/6" />
+                    <Skeleton className="h-4 w-4/6" />
+                  </>
+                ) : (
+                  currentProject.outputs.requirements.map((item) => (
+                    <p key={item}>- {item}</p>
+                  ))
+                )}
               </CardContent>
             </Card>
 
@@ -250,7 +260,16 @@ export default async function ProjectWorkspacePage({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 text-sm text-muted-foreground">
-                {currentProject.outputs.architectureBlocks && currentProject.outputs.architectureBlocks.length > 0 ? (
+                {isGenerating ? (
+                  <>
+                    <Skeleton className="h-32 w-full" />
+                    <div className="flex gap-3">
+                      <Skeleton className="h-4 w-24" />
+                      <Skeleton className="h-4 w-20" />
+                      <Skeleton className="h-4 w-28" />
+                    </div>
+                  </>
+                ) : currentProject.outputs.architectureBlocks && currentProject.outputs.architectureBlocks.length > 0 ? (
                   <CircuitGraph blocks={currentProject.outputs.architectureBlocks} />
                 ) : (
                   currentProject.outputs.architecture.map((item) => (
@@ -381,9 +400,18 @@ export default async function ProjectWorkspacePage({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {currentProject.outputs.bom.map((item) => (
-                  <BomEditorRow key={item.id} projectId={currentProject.id} item={item} />
-                ))}
+                {isGenerating ? (
+                  <>
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                  </>
+                ) : (
+                  currentProject.outputs.bom.map((item) => (
+                    <BomEditorRow key={item.id} projectId={currentProject.id} item={item} />
+                  ))
+                )}
               </CardContent>
             </Card>
 
@@ -396,7 +424,12 @@ export default async function ProjectWorkspacePage({
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {(() => {
+                {isGenerating ? (
+                  <>
+                    <Skeleton className="h-12 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                  </>
+                ) : (() => {
                   const active = currentProject.outputs.validations.filter((v) => !v.dismissed);
                   const dismissed = currentProject.outputs.validations.filter((v) => !!v.dismissed);
                   return (
