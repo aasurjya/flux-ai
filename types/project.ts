@@ -51,6 +51,14 @@ export interface BomItem {
   quantity: number;
   package: string;
   status: "selected" | "alternate" | "needs_review";
+  /**
+   * Canonical electrical value — "100nF", "10k", "5V", "10µF".
+   * Optional so legacy projects (pre-Phase-6) still validate.
+   * Rules prefer this over regex-on-name when present.
+   */
+  value?: string;
+  /** Manufacturer part number when confident (e.g. "GRM155R71H104KA88D"). */
+  mpn?: string;
 }
 
 /**

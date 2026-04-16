@@ -69,7 +69,12 @@ const BomItemSchema = z.object({
   name: safeStr(1, 240),
   quantity: z.number().int().min(1).max(9999),
   package: z.string().min(1).max(60),
-  status: z.enum(["selected", "alternate", "needs_review"])
+  status: z.enum(["selected", "alternate", "needs_review"]),
+  // Canonical electrical value ("100nF", "10k", "5V"). Optional: legacy
+  // projects have only free-text `name`. Rules prefer this when present.
+  value: z.string().min(1).max(40).optional(),
+  // Manufacturer part number when the BOM prompt is confident.
+  mpn: z.string().min(1).max(80).optional()
 });
 
 const CircuitBlockSchema = z.object({

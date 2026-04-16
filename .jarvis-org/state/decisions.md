@@ -227,3 +227,74 @@ Deferring Phase 5 (SQLite) AGAIN — still zero production users.
 Deferring Phase 7 (improve-design replacement) until Phase 6 lands —
 rules get cleaner with structured fields, making replacement diffs
 easier to express.
+
+---
+
+## 2026-04-16 — Cycle 5 closing review
+
+### What shipped
+Phase 6 — design rules read structured BOM `value` / `mpn` fields.
+
+Files:
+- `types/project.ts` — optional `value?: string` / `mpn?: string` on
+  BomItem (back-compat).
+- `lib/project-schema.ts` — schema updated with length-bounded
+  optional fields.
+- `lib/ai/design-rules.ts` — new `parseValue` helper (handles "100nF",
+  "10k", "4k7", "4.7kΩ", "10µF") + `bomValueMatches(bom, "C", pred)`
+  structured check. `DR-DECOUPLING` and `DR-I2C-PULLUP` now check
+  structured fields FIRST, fall back to regex on name for legacy
+  projects. Other rules unchanged for now (conservative).
+- `lib/ai/design-rules-structured.test.ts` — 6 new tests covering
+  structured-match, structured-insufficient, and regex-fallback paths
+  for both rules.
+- `lib/ai/suggest-bom.ts` — Zod schema accepts optional `value`/`mpn`
+  from the LLM; normalize passes them through.
+- `lib/ai/prompts.ts` — BOM system prompt now tells the LLM to emit
+  `value` for every passive and `mpn` only when confident.
+- `lib/ai/improve-design.ts` — BomAddSchema accepts `value`/`mpn` so
+  AI-proposed additions are rule-visible immediately.
+- `lib/ai/stub-client.ts` — stub BOM + stub improvement responses
+  include `value` so tests exercise the new path.
+- `app/api/projects/[id]/bom/[designator]/route.ts` — PATCH schema
+  accepts `value` and `mpn` (with `null` to clear). `.strict()` still
+  rejects designator-hijack attempts.
+- `app/api/projects/[id]/bom/[designator]/route.test.ts` — 2 new
+  tests (set value → round-trip; null clears).
+- `lib/project-store.ts patchBomItem` — handles null-clear semantics
+  and records value/mpn transitions in the revision changes list.
+- `app/projects/[id]/bom-editor-row.tsx` — new Value input in the
+  editor grid, read-only badge surfaces value when set, MPN text
+  shown under Qty/package.
+
+### Gate outcomes
+- Unit: 222 / 222 green (+8). Was 214.
+- E2E: 42 / 42 green. Unchanged count — existing BOM E2E still passes.
+- Build: exit 0.
+- Coverage: thresholds hold.
+
+### Did it move a KPI?
+Qualitative: a paraphrase-heavy LLM output ("0.1µF MLCC X7R 0402")
+now passes DR-DECOUPLING via structured value, where previously it
+would have slipped through the regex. Formal measurement (telemetry)
+still deferred to Phase 8.
+
+### Org-memory updates
+- **R17** — Additive schema extensions must be truly optional, AND the
+  fallback path must be tested explicitly. Adding `value?` without a
+  regex-fallback test would mean legacy projects silently start
+  firing false-positive rules. Always test both paths when extending
+  a data source.
+- **R18** — `null` + `undefined` aren't interchangeable in PATCH
+  semantics. `undefined` = "no change". `null` = "clear this field".
+  Use `z.union([z.string(), z.null()]).optional()` to express that
+  distinction at the schema layer.
+
+### Next cycle (Cycle 6) direction
+Phase 7 — fix `improve-design` silent-skip. When the LLM proposes an
+addition whose designator already exists, `applyBomEdits` currently
+silently drops it. With Phase 6 structured fields landed, a
+replacement can be detected: same designator + different
+name/value/mpn → remove old + add new + record "Replaced U3: X → Y".
+
+Deferring Phase 5 (SQLite) YET AGAIN — still no concurrency pressure.

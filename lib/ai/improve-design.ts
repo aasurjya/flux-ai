@@ -21,7 +21,12 @@ const BomAddSchema = z.object({
   package: z.string().min(1).max(60),
   quantity: z.number().int().min(1).max(999),
   status: z.enum(["selected", "alternate", "needs_review"]),
-  rationale: z.string().min(4).max(300)
+  rationale: z.string().min(4).max(300),
+  // Phase 6 structured fields — forward them through when the LLM
+  // emits them. Keeps the design-rule checks effective on the new
+  // additions, not just the originals.
+  value: z.string().min(1).max(40).optional(),
+  mpn: z.string().min(1).max(80).optional()
 });
 
 const BomRemoveSchema = z.object({
@@ -132,7 +137,9 @@ function applyBomEdits(
       name: add.name,
       quantity: add.quantity,
       package: add.package,
-      status: add.status
+      status: add.status,
+      ...(add.value ? { value: add.value } : {}),
+      ...(add.mpn ? { mpn: add.mpn } : {})
     });
     changes.push(`Added ${add.designator} (${add.name}): ${add.rationale}`);
   }

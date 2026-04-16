@@ -10,20 +10,19 @@ signal. When signal is absent, it mirrors the phase plan.
 
 ## Next (committed this cycle)
 
-### 1. Structured BOM fields for rules (Phase 6 of the plan)
+### 1. Improve-design replacement support (Phase 7 of the plan)
 **Score:** 8/10
-**Evidence:** Current regex-on-prose rules like `/100nF/i` match the
-string "100nF" but miss "0.1µF MLCC X7R 0402" for the SAME part.
-Coverage is 91% but on hand-crafted inputs, not LLM paraphrase. Real
-LLM output has unpredictable naming. Structured fields (`value`, `mpn`)
-let rules check data instead of stringified shapes.
+**Evidence:** `applyBomEdits` silently drops additions whose
+designator collides with an existing item. Means the LLM can never
+say "swap U3 for a better LDO" — the user thinks improve-design did
+nothing. Phase 6 structured fields now let us detect replacements
+(same designator + different value/name/mpn = replace).
 **Owner:** tdd-guide (dev) + architect (review)
 **Story:** see below.
 
 ## Up next (ordered, not committed this cycle)
 
-2. **Improve-design replacement support** (Phase 7) — evidence: silent-skip bug on same-designator additions
-3. **Telemetry + `/admin/stats`** (Phase 8) — evidence: we're flying blind on all KPIs
+2. **Telemetry + `/admin/stats`** (Phase 8) — evidence: we're flying blind on all KPIs
 
 ## Parking lot
 
@@ -41,32 +40,29 @@ None yet (cycle 0).
 - **Cycle 1 — Phase 1 KiCad net labels + power symbols** ✅ (commit f26c3f1)
 - **Cycle 2 — Phase 2 inline BOM editing** ✅ (commit 3f01c29)
 - **Cycle 3 — Phase 3 dismiss validation issues** ✅ (commit 8567092)
-- **Cycle 4 — Phase 4 streaming generation via SSE** ✅ (this cycle)
+- **Cycle 4 — Phase 4 streaming generation via SSE** ✅ (commit 5bb68e8)
+- **Cycle 5 — Phase 6 structured BOM fields** ✅ (this cycle)
 
 ## Stories
 
-### 1. Structured BOM fields for deterministic rules
+### 1. Improve-design replacement support
 
-**As a** developer of the design-rules engine
-**I want** rules to read structured `value` and `mpn` fields on BOM items
-**So that** LLM paraphrase variants don't silently bypass the rule.
+**As a** user clicking "Improve design"
+**I want** the LLM to be able to propose "swap U3 for a better LDO"
+**So that** improve-design can upgrade a design rather than only ever adding new parts.
 
 **Acceptance criteria:**
-- [ ] `BomItem` gains optional `value?: string` ("100nF", "10k") and `mpn?: string`
-- [ ] `BomItemSchema` updated (back-compat: both optional)
-- [ ] `suggest-bom.ts` system prompt emits `value` for every passive, `mpn` when confident
-- [ ] Rules rewritten to check structured fields:
-  - `DR-DECOUPLING`: any `C*` with `value === "100nF"`
-  - `DR-I2C-PULLUP`: any `R*` with `value` that parses as `>= 4.7k`
-  - (similar for RESET, PROGRAMMING-HEADER where applicable)
-- [ ] Regex fallback preserved for old projects where `value` is absent — no silent regression on existing data
-- [ ] Tests: per rule, add structured-BOM-passes tests with deliberately obtuse `name` ("0.1µF MLCC X7R 0402") + correct `value: "100nF"`. Both paths (structured-hit + regex-fallback) asserted.
+- [ ] `applyBomEdits` detects same-designator additions and treats them as replacements when `name`, `value`, or `mpn` differs
+- [ ] Replacement records BOTH the removal AND the addition as `Replaced U3: X → Y` in the revision.changes list (one entry, not two)
+- [ ] SYSTEM_PROMPT of improve-design tells the LLM this mechanism exists so it proposes replacements naturally
+- [ ] Tests: improve-design proposes a replacement → result BOM has the new part at the same designator + revision explains the replacement
+- [ ] Edge: if LLM proposes an addition identical to existing (same name/value/mpn), still silently skip (it's a no-op)
 - [ ] Coverage thresholds hold.
 
 **Out of scope:**
-- Migrating historical JSON files to add `value` fields (lazy only)
-- Manufacturer-part-number validation against distributor APIs (future)
+- Multi-way swaps (A ↔ B at same time)
+- Revert-a-replacement UI (future)
 
 **Evidence / references:**
-- socratic-challenger finding #2 (design-rule regex fragility unmeasured)
-- Plan file Phase 6
+- Plan file Phase 7
+- socratic-challenger finding: silent-skip bug on same-designator additions

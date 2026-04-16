@@ -1,7 +1,7 @@
 # Current cycle — flux.ai
 
-**Cycle:** 4 shipped → cycle 5 queued
-**Focus (cycle 5):** Phase 6 — rules read structured BomItem fields (value, mpn)
+**Cycle:** 5 shipped → cycle 6 queued
+**Focus (cycle 6):** Phase 7 — fix improve-design silent-skip (enable replacements)
 
 ## Cycle 0 — bootstrap (2026-04-16) ✅
 
@@ -75,14 +75,35 @@ restored.
 **Outcome:** User sees per-stage progress within ~100ms of clicking
 Generate instead of a blank "Generating..." button for 30s.
 
-## Cycle 5 — scheduled
+## Cycle 5 — Phase 6 shipped (2026-04-16) ✅
 
-**Goal:** Phase 6 — design rules read structured BOM fields (value, mpn).
-**Entry criteria:** Cycle 4 committed; green gates.
-**Rationale:** Current regex-on-prose rules are fragile. `/100nF/` matches
-"100nF" but misses "0.1µF MLCC X7R 0402" (same part). Add `value?`/`mpn?`
-to `BomItem` schema, have the BOM prompt emit them, rewrite rules to
-check structured fields. Regex fallback preserves behavior on old projects.
+**Goal:** Rules read structured BOM fields, not regex-on-prose.
+
+- [x] `BomItem.value?` and `mpn?` added to types + schema
+- [x] `parseValue()` helper handles 100nF / 10k / 4k7 / 4.7kΩ / 10µF etc.
+- [x] `bomValueMatches(bom, "C", pred)` structured check
+- [x] `DR-DECOUPLING` + `DR-I2C-PULLUP` check structured first, regex fallback
+- [x] 6 new structured-rule tests (match, miss, regex-fallback for each rule)
+- [x] BOM prompt tells LLM to emit `value` for every passive
+- [x] suggest-bom + improve-design accept value/mpn through the schema
+- [x] PATCH route accepts value/mpn with null-to-clear semantics
+- [x] BOM editor UI: Value input + display badge, MPN shown under qty/pkg
+- [x] Full regression: 222 unit + 42 E2E green, build exit 0
+- [x] Org-memory: R17 (fallback path required), R18 (null vs undefined in patches)
+
+**Outcome:** A paraphrase-heavy LLM BOM ("0.1µF MLCC X7R 0402") now
+passes DR-DECOUPLING via structured `value: "100nF"`, where the old
+regex would have missed it.
+
+## Cycle 6 — scheduled
+
+**Goal:** Phase 7 — fix improve-design silent-skip (enable replacements).
+**Entry criteria:** Cycle 5 committed; green gates.
+**Rationale:** `applyBomEdits` silently drops an addition whose
+designator already exists. With Phase 6 structured fields landed,
+"same designator + different value" is now a reliable signal for a
+REPLACEMENT (swap old for new + record "Replaced U3: X → Y"). Unlocks
+real improve-design value beyond "add to BOM".
 
 ## Cycle log
 
@@ -92,4 +113,5 @@ Each run of `/jarvis-cycle` appends here.
 - Cycle 1: Phase 1 (KiCad wires) shipped — 2026-04-16 (f26c3f1)
 - Cycle 2: Phase 2 (inline BOM editing) shipped — 2026-04-16 (3f01c29)
 - Cycle 3: Phase 3 (dismiss validations) shipped — 2026-04-16 (8567092)
-- Cycle 4: Phase 4 (SSE streaming) shipped — 2026-04-16 (pending commit)
+- Cycle 4: Phase 4 (SSE streaming) shipped — 2026-04-16 (5bb68e8)
+- Cycle 5: Phase 6 (structured BOM fields) shipped — 2026-04-16 (pending commit)

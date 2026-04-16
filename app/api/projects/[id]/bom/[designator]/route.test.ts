@@ -105,6 +105,44 @@ describe("PATCH /api/projects/[id]/bom/[designator]", () => {
     expect(res.status).toBe(400);
   });
 
+  it("accepts a structured `value` edit and round-trips it on read", async () => {
+    const id = await seedProject();
+    const before = await getProjectById(id);
+    const targetDesignator = before!.outputs.bom[0].designator;
+
+    const res = await PATCH(
+      bodyRequest({ value: "100nF" }) as Parameters<typeof PATCH>[0],
+      await params(id, targetDesignator)
+    );
+    expect(res.status).toBe(200);
+    const after = await getProjectById(id);
+    const patched = after!.outputs.bom.find((b) => b.designator === targetDesignator);
+    expect(patched!.value).toBe("100nF");
+    // Revision records the value change
+    expect(after!.revisions[0].changes.join(" ")).toMatch(/value:/);
+  });
+
+  it("clearing value via null removes the field", async () => {
+    const id = await seedProject();
+    const before = await getProjectById(id);
+    const targetDesignator = before!.outputs.bom[0].designator;
+
+    // First set a value
+    await PATCH(
+      bodyRequest({ value: "100nF" }) as Parameters<typeof PATCH>[0],
+      await params(id, targetDesignator)
+    );
+    // Then clear it
+    const res = await PATCH(
+      bodyRequest({ value: null }) as Parameters<typeof PATCH>[0],
+      await params(id, targetDesignator)
+    );
+    expect(res.status).toBe(200);
+    const after = await getProjectById(id);
+    const patched = after!.outputs.bom.find((b) => b.designator === targetDesignator);
+    expect(patched!.value).toBeUndefined();
+  });
+
   it("does not allow changing designator via PATCH (PATCH is scoped to designator)", async () => {
     const id = await seedProject();
     const before = await getProjectById(id);

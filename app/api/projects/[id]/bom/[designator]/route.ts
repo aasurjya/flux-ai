@@ -22,7 +22,12 @@ const BomPatchSchema = z
     name: z.string().min(2).max(240).optional(),
     quantity: z.number().int().min(1).max(9999).optional(),
     package: z.string().min(1).max(60).optional(),
-    status: z.enum(["selected", "alternate", "needs_review"]).optional()
+    status: z.enum(["selected", "alternate", "needs_review"]).optional(),
+    // Phase 6: user may edit or clear the structured value/mpn fields.
+    // `null` explicitly removes the field (e.g. user-entered value no
+    // longer applies); a non-empty string sets it.
+    value: z.union([z.string().min(1).max(40), z.null()]).optional(),
+    mpn: z.union([z.string().min(1).max(80), z.null()]).optional()
   })
   .strict() // reject unknown fields including `designator` attempts
   .refine((obj) => Object.keys(obj).length > 0, {

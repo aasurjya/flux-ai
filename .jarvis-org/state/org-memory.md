@@ -126,6 +126,24 @@ wrap in a narrow try/catch so unit tests can exercise the route body
 without a full Next request context. Never silently swallow in
 production-only code paths.
 
+### R17 — Additive schema fields require an explicit fallback test
+**Source:** Org Cycle 5 — Phase 6 structured BOM fields.
+**Rule:** When you add an optional `value?` field that the rules
+engine prefers over an existing regex check, legacy projects (where
+`value` is absent) MUST still pass the regex path. Add a test that
+explicitly constructs a BOM without `value` and asserts the rule
+behaves the same as before. Skipping this test = silent regression
+for every customer who hasn't re-run generation since the migration.
+
+### R18 — `null` vs `undefined` in PATCH bodies is a semantic distinction
+**Source:** Org Cycle 5 — BOM value editing.
+**Rule:** `undefined` (omitted key) means "no change". `null` means
+"clear this field". Express the distinction at the schema layer with
+`z.union([z.string(), z.null()]).optional()`. In the store, handle
+the three cases explicitly: omitted → keep, null → delete, string →
+set. Don't collapse them or the user can't clear a field without
+breaking back-compat on nullable clients.
+
 ## Failed experiments (do not repeat)
 
 ### F1 — Mock-project deletion

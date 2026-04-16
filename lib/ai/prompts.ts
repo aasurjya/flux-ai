@@ -57,6 +57,8 @@ Produce a BOM list where each item has:
 - quantity: integer ≥ 1
 - package: the physical package (e.g. "QFN-32", "0402", "SMA", "Module"). If truly unknown, use "TBD".
 - status: "selected" if a specific, appropriate, available part is chosen; "alternate" for suggested alternatives; "needs_review" if the choice depends on information the brief did not provide.
+- value: required for every passive (R, C, L), optional for actives. Use compact standard notation — "100nF", "10µF", "10k", "4.7k", "5V", "3.3V". Downstream design-rule checks read this field to verify decoupling, pullups, etc., so cosmetic variants in \`name\` never bypass them.
+- mpn: optional manufacturer part number when you are confident (e.g. "GRM155R71H104KA88D"). Leave absent rather than guess.
 
 Manufacturability (prefer in this order unless the brief says otherwise):
 1. JLCPCB Basic library parts (lowest assembly cost, always in stock)

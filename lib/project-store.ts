@@ -328,6 +328,9 @@ export async function patchBomItem(input: {
     quantity?: number;
     package?: string;
     status?: "selected" | "alternate" | "needs_review";
+    /** null = clear the field; string = set it; omitted = no change. */
+    value?: string | null;
+    mpn?: string | null;
   };
 }): Promise<ProjectSummary> {
   return withStoreLock(async () => {
@@ -343,12 +346,24 @@ export async function patchBomItem(input: {
     }
     const before = project.outputs.bom[itemIndex];
     // Merge: designator + id are preserved; only user-editable fields move.
+    // value/mpn use `null = clear, string = set` semantics.
+    const applyOptional = (current: string | undefined, next: string | null | undefined) => {
+      if (next === undefined) return current === undefined ? {} : { __keep: current };
+      if (next === null) return { __clear: true };
+      return { __set: next };
+    };
+    const valueOp = applyOptional(before.value, input.patch.value);
+    const mpnOp = applyOptional(before.mpn, input.patch.mpn);
     const after = {
       ...before,
       ...("name" in input.patch ? { name: input.patch.name! } : {}),
       ...("quantity" in input.patch ? { quantity: input.patch.quantity! } : {}),
       ...("package" in input.patch ? { package: input.patch.package! } : {}),
-      ...("status" in input.patch ? { status: input.patch.status! } : {})
+      ...("status" in input.patch ? { status: input.patch.status! } : {}),
+      ...("__set" in valueOp ? { value: valueOp.__set } : {}),
+      ...("__clear" in valueOp ? { value: undefined } : {}),
+      ...("__set" in mpnOp ? { mpn: mpnOp.__set } : {}),
+      ...("__clear" in mpnOp ? { mpn: undefined } : {})
     };
     const nextBom = [...project.outputs.bom];
     nextBom[itemIndex] = after;
@@ -366,6 +381,12 @@ export async function patchBomItem(input: {
     }
     if (input.patch.status !== undefined && before.status !== after.status) {
       changedFields.push(`status: ${before.status} → ${after.status}`);
+    }
+    if (input.patch.value !== undefined && before.value !== after.value) {
+      changedFields.push(`value: ${JSON.stringify(before.value ?? null)} → ${JSON.stringify(after.value ?? null)}`);
+    }
+    if (input.patch.mpn !== undefined && before.mpn !== after.mpn) {
+      changedFields.push(`mpn: ${JSON.stringify(before.mpn ?? null)} → ${JSON.stringify(after.mpn ?? null)}`);
     }
 
     const updatedOutputs = { ...project.outputs, bom: nextBom };

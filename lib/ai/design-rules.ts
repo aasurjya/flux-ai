@@ -31,7 +31,12 @@ type Rule = (ctx: DesignRuleContext) => DesignRuleIssue[];
 
 function bomContains(bom: BomItem[], patterns: RegExp[]): boolean {
   return bom.some((item) =>
-    patterns.some((re) => re.test(item.name) || re.test(item.designator))
+    patterns.some(
+      (re) =>
+        re.test(item.name) ||
+        re.test(item.designator) ||
+        (item.value !== undefined && re.test(item.value))
+    )
   );
 }
 
@@ -39,6 +44,58 @@ function architectureHas(blocks: CircuitBlock[], patterns: RegExp[]): boolean {
   return blocks.some((b) =>
     patterns.some((re) => re.test(b.id) || re.test(b.label))
   );
+}
+
+/**
+ * Parse an electrical value string like "100nF", "10k", "4.7kΩ", "10µF".
+ * Returns the numeric magnitude in base units (farads / ohms), or null
+ * if the string isn't a recognised value. Pure function, no side
+ * effects — used by rules that need to compare "is this at least 4.7k"
+ * rather than pattern-matching on substrings.
+ */
+function parseValue(raw: string): number | null {
+  const s = raw.trim().replace(/[Ωohms?]/gi, "").replace(/[\s]/g, "");
+  const m = /^([0-9]*\.?[0-9]+)([kmgµupnf]?)([fhr]?)$/i.exec(s);
+  // Also tolerate "4k7" style: digit-k-digit
+  const dashMatch = /^([0-9]+)k([0-9]+)$/i.exec(s);
+  if (dashMatch) {
+    const major = Number(dashMatch[1]);
+    const minor = Number(dashMatch[2]);
+    return (major + minor / Math.pow(10, dashMatch[2].length)) * 1000;
+  }
+  if (!m) return null;
+  const num = Number(m[1]);
+  if (!Number.isFinite(num)) return null;
+  const mult = m[2].toLowerCase();
+  const multMap: Record<string, number> = {
+    "": 1,
+    k: 1_000,
+    m: 1e-3, // ambiguous (milli vs mega) — treat as milli for capacitors, mega unused here
+    g: 1e9,
+    µ: 1e-6,
+    u: 1e-6,
+    n: 1e-9,
+    p: 1e-12
+  };
+  return num * (multMap[mult] ?? 1);
+}
+
+/**
+ * Structured check: does any BOM row with designator prefix `desPrefix`
+ * match the numeric predicate on its `value` field? Missing value is
+ * skipped (caller falls back to regex). Used by the new Phase 6 rules.
+ */
+function bomValueMatches(
+  bom: BomItem[],
+  desPrefix: string,
+  predicate: (magnitude: number) => boolean
+): boolean {
+  return bom.some((item) => {
+    if (!item.designator.toUpperCase().startsWith(desPrefix)) return false;
+    if (item.value === undefined) return false;
+    const n = parseValue(item.value);
+    return n !== null && predicate(n);
+  });
 }
 
 import { slugify } from "@/lib/utils";
@@ -70,16 +127,20 @@ const decouplingCapsRule: Rule = ({ architectureBlocks, bom }) => {
   );
   if (!hasActiveIcs) return [];
 
-  const hasSmallCeramic = bomContains(bom, [
-    /\b(?:100 ?n|0\.1 ?u|0\.1 ?µ)f/i,
-    /100\s*nF/i
-  ]);
-  const hasBulkCap = bomContains(bom, [
-    /\b(?:[1-9]\d?\s*|10\s*)uF/i,
-    /\b(?:[1-9]\d?\s*|10\s*)µF/i,
-    /bulk/i,
-    /tantalum/i
-  ]);
+  // Structured-field check first (Phase 6). Any capacitor (C*) with
+  // value within ±10% of 100nF counts as decoupling; any C* ≥ 1µF
+  // counts as bulk. Falls back to regex on name when value is absent.
+  const hasSmallCeramic =
+    bomValueMatches(bom, "C", (f) => f >= 80e-9 && f <= 120e-9) ||
+    bomContains(bom, [/\b(?:100 ?n|0\.1 ?u|0\.1 ?µ)f/i, /100\s*nF/i]);
+  const hasBulkCap =
+    bomValueMatches(bom, "C", (f) => f >= 1e-6) ||
+    bomContains(bom, [
+      /\b(?:[1-9]\d?\s*|10\s*)uF/i,
+      /\b(?:[1-9]\d?\s*|10\s*)µF/i,
+      /bulk/i,
+      /tantalum/i
+    ]);
 
   const out: DesignRuleIssue[] = [];
   if (!hasSmallCeramic) {
@@ -115,10 +176,12 @@ const i2cPullupRule: Rule = ({ architectureBlocks, bom }) => {
   const hasI2c = architectureHas(architectureBlocks, [/i2c/i, /i²c/i]);
   if (!hasI2c) return [];
 
-  const hasPullup = bomContains(bom, [
-    /pull[- ]?up/i,
-    /\b(?:4\.7|4k7|10) ?k/i
-  ]);
+  // Structured-field check first (Phase 6): any resistor (R*) with
+  // value ≥ 4.7kΩ counts as a valid I²C pullup. Falls back to regex on
+  // name when value is absent, for back-compat with legacy projects.
+  const hasPullup =
+    bomValueMatches(bom, "R", (ohms) => ohms >= 4_700) ||
+    bomContains(bom, [/pull[- ]?up/i, /\b(?:4\.7|4k7|10) ?k/i]);
   if (hasPullup) return [];
 
   return [

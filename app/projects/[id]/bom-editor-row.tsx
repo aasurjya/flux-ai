@@ -30,7 +30,8 @@ export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
     name: item.name,
     quantity: String(item.quantity),
     package: item.package,
-    status: item.status
+    status: item.status,
+    value: item.value ?? ""
   });
 
   function resetDraft() {
@@ -38,7 +39,8 @@ export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
       name: item.name,
       quantity: String(item.quantity),
       package: item.package,
-      status: item.status
+      status: item.status,
+      value: item.value ?? ""
     });
     setError(null);
   }
@@ -62,6 +64,13 @@ export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
       if (q !== item.quantity) patch.quantity = q;
       if (draft.package !== item.package) patch.package = draft.package.trim();
       if (draft.status !== item.status) patch.status = draft.status;
+      const trimmedValue = draft.value.trim();
+      const currentValue = item.value ?? "";
+      if (trimmedValue !== currentValue) {
+        // Allow clearing the value — undefined removes it, since schema
+        // requires min length of 1 when present
+        patch.value = trimmedValue === "" ? null : trimmedValue;
+      }
       if (Object.keys(patch).length === 0) {
         setEditing(false);
         return;
@@ -103,9 +112,15 @@ export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
           <div className="min-w-0">
             <p className="break-words font-medium text-foreground">
               {item.designator} — {item.name}
+              {item.value && (
+                <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary">
+                  {item.value}
+                </span>
+              )}
             </p>
             <p className="text-sm text-muted-foreground">
               Qty {item.quantity} · {item.package}
+              {item.mpn && <span className="ml-2 font-mono text-xs opacity-70">MPN: {item.mpn}</span>}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -130,7 +145,7 @@ export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
 
   return (
     <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 space-y-3">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_100px_1fr_140px]">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[auto_1fr_90px_90px_1fr_140px]">
         <span className="font-mono text-sm font-medium text-muted-foreground self-center">
           {item.designator}
         </span>
@@ -138,6 +153,14 @@ export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
           aria-label="Part name"
           value={draft.name}
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          onKeyDown={handleKey}
+          disabled={saving}
+        />
+        <Input
+          aria-label="Value"
+          placeholder="e.g. 100nF"
+          value={draft.value}
+          onChange={(e) => setDraft({ ...draft, value: e.target.value })}
           onKeyDown={handleKey}
           disabled={saving}
         />

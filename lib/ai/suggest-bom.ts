@@ -10,7 +10,12 @@ const BomItemSchema = z.object({
   name: z.string().min(2).max(120),
   quantity: z.number().int().min(1).max(999),
   package: z.string().min(1).max(60),
-  status: z.enum(["selected", "alternate", "needs_review"])
+  status: z.enum(["selected", "alternate", "needs_review"]),
+  // Phase 6 structured fields — optional on the LLM side. Rules prefer
+  // these over regex-on-name when present. Emit for every passive;
+  // include mpn only when you're confident about the exact part.
+  value: z.string().min(1).max(40).optional(),
+  mpn: z.string().min(1).max(80).optional()
 });
 
 const ResponseSchema = z.object({
@@ -51,7 +56,9 @@ function normalize(items: z.infer<typeof BomItemSchema>[]): BomItem[] {
       name: raw.name.trim(),
       quantity: raw.quantity,
       package: raw.package.trim(),
-      status: raw.status
+      status: raw.status,
+      ...(raw.value ? { value: raw.value.trim() } : {}),
+      ...(raw.mpn ? { mpn: raw.mpn.trim() } : {})
     });
   }
   return out;

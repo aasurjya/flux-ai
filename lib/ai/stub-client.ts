@@ -44,7 +44,7 @@ const STUB_BLOCKS: CircuitBlock[] = [
 const STUB_BOM: BomItem[] = [
   { id: "bom-j1", designator: "J1", name: "USB-C receptacle, 16-pin", quantity: 1, package: "SMD", status: "selected" },
   { id: "bom-d1", designator: "D1", name: "ESD TVS array", quantity: 1, package: "SOT-23-6", status: "selected" },
-  { id: "bom-u1", designator: "U1", name: "3.3V LDO 500 mA", quantity: 1, package: "SOT-223", status: "needs_review" },
+  { id: "bom-u1", designator: "U1", name: "3.3V LDO 500 mA", quantity: 1, package: "SOT-223", status: "needs_review", value: "3.3V" },
   { id: "bom-u2", designator: "U2", name: "ESP32-S3-WROOM-1 (example — confirm part in the real AI run)", quantity: 1, package: "Module", status: "needs_review" },
   { id: "bom-j2", designator: "J2", name: "SWD / UART 2x5 header", quantity: 1, package: "THT 1.27 mm", status: "selected" }
 ];
@@ -95,6 +95,7 @@ const STUB_RESPONSES: Record<string, unknown> = {
         package: "0402",
         quantity: 4,
         status: "selected",
+        value: "100nF",
         rationale: "Resolves DR-DECOUPLING: one 100nF per active IC VDD pin within 3mm"
       },
       {
@@ -103,6 +104,7 @@ const STUB_RESPONSES: Record<string, unknown> = {
         package: "0603",
         quantity: 2,
         status: "selected",
+        value: "10uF",
         rationale: "Resolves DR-DECOUPLING: bulk energy reservoir per regulator output"
       }
     ],
