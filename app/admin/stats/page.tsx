@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { readCounters } from "@/lib/telemetry";
 import { isTokenValid } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -6,21 +7,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 /**
  * /admin/stats — read-only dashboard of telemetry counters.
  *
- * Gated behind the `FLUX_ADMIN_TOKEN` env var. The page expects the
- * token as `?token=...` in the URL. If absent or mismatched, redirects
- * to the homepage. This is intentionally lightweight — the goal is to
- * answer "which features are being used?" during the pre-launch phase,
- * not to build a production admin panel.
+ * Gated behind the `FLUX_ADMIN_TOKEN` env var. Authentication is via
+ * an HttpOnly cookie set by /admin/login — the token never appears in
+ * the URL, browser history, or referrer headers.
  */
-export default async function AdminStatsPage({
-  searchParams
-}: {
-  searchParams: Promise<{ token?: string }>;
-}) {
-  const params = await searchParams;
+export default async function AdminStatsPage() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("flux_admin_token")?.value ?? "";
   const expected = process.env.FLUX_ADMIN_TOKEN ?? "";
-  if (!isTokenValid(params.token ?? "", expected)) {
-    redirect("/");
+  if (!isTokenValid(token, expected)) {
+    redirect("/admin/login");
   }
 
   const counters = await readCounters();
