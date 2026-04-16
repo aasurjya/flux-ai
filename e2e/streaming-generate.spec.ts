@@ -37,6 +37,38 @@ test.describe("Streaming generate button", () => {
     expect(getErrors()).toEqual([]);
   });
 
+  test("streaming panel fits within 375px mobile viewport without horizontal overflow", async ({ page }, testInfo) => {
+    const getErrors = guardConsole(page, testInfo);
+
+    // Use iPhone SE width — worst-case mobile
+    await page.setViewportSize({ width: 375, height: 667 });
+
+    const unique = `StreamMobile ${Date.now()}`;
+    await page.goto("/projects/new");
+    await page.getByLabel("Project name").fill(unique);
+    await page.getByLabel("Design prompt").fill("ESP32 mobile overflow test");
+    await page.getByRole("button", { name: /continue to workspace/i }).click();
+
+    await page.getByRole("button", { name: /generate design/i }).click();
+
+    // Wait for the live pipeline panel to appear
+    const panel = page.getByRole("status", { name: /generation progress/i });
+    await expect(panel).toBeVisible({ timeout: 4000 });
+
+    // The panel must not cause horizontal scroll on the document
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+
+    // The panel itself must fit within the viewport
+    const panelBox = await panel.boundingBox();
+    if (panelBox) {
+      expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(375 + 1);
+    }
+
+    expect(getErrors()).toEqual([]);
+  });
+
   test("clicking Generate while pending is a no-op (button disabled)", async ({ page }) => {
     const unique = `StreamingDisabled ${Date.now()}`;
     await page.goto("/projects/new");

@@ -109,15 +109,15 @@ export function GenerateStreamingButton({
         type="button"
         onClick={handleClick}
         disabled={pending}
-        aria-live="polite"
       >
         {pending ? "Generating..." : isGenerating ? "Continue generation" : "Generate design"}
       </Button>
       {(pending || error) && visibleStages.length > 0 && (
         <div
           role="status"
+          aria-live="polite"
           aria-label="Generation progress"
-          className="absolute right-0 top-full z-10 mt-2 w-72 rounded-lg border border-border/70 bg-card/95 p-3 shadow-lg"
+          className="absolute right-0 top-full z-10 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-border/70 bg-card/95 p-3 shadow-lg"
         >
           <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             AI pipeline
