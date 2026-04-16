@@ -6,6 +6,7 @@ import { Check, Pencil, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/toast";
 import type { BomItem } from "@/types/project";
 
 interface BomEditorRowProps {
@@ -23,6 +24,7 @@ interface BomEditorRowProps {
  */
 export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
   const router = useRouter();
+  const { toast } = useToast();
   const [editing, setEditing] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -89,6 +91,7 @@ export function BomEditorRow({ projectId, item }: BomEditorRowProps) {
         return;
       }
       setEditing(false);
+      toast(`${item.designator} updated`);
       router.refresh();
     } finally {
       setSaving(false);

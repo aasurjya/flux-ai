@@ -5,6 +5,7 @@ import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "@/components/ui/form-error";
+import { useToast } from "@/components/ui/toast";
 
 interface ImportProjectFormProps {
   action: (formData: FormData) => Promise<{ error?: string } | void>;
@@ -16,6 +17,7 @@ interface ImportProjectFormProps {
  * ProjectSummarySchema) and returns a structured error for display.
  */
 export function ImportProjectForm({ action }: ImportProjectFormProps) {
+  const { toast } = useToast();
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
   const detailsRef = React.useRef<HTMLDetailsElement | null>(null);
@@ -30,6 +32,7 @@ export function ImportProjectForm({ action }: ImportProjectFormProps) {
       } else {
         // success — close the panel
         if (detailsRef.current) detailsRef.current.open = false;
+        toast("Project imported successfully");
       }
     } finally {
       setPending(false);

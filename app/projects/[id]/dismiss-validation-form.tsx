@@ -4,6 +4,7 @@ import * as React from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
 
 interface DismissValidationFormProps {
   projectId: string;
@@ -27,6 +28,7 @@ export function DismissValidationForm({
   validationTitle,
   action
 }: DismissValidationFormProps) {
+  const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
   const [reason, setReason] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -42,6 +44,7 @@ export function DismissValidationForm({
       } else {
         setOpen(false);
         setReason("");
+        toast("Validation issue dismissed");
       }
     } finally {
       setPending(false);

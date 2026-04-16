@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Inter } from "next/font/google";
 import "@/app/globals.css";
 import { SiteHeader } from "@/components/site-header";
+import { ToastProvider } from "@/components/ui/toast";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -15,10 +16,12 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
   return (
     <html lang="en">
       <body className={inter.className}>
-        <div className="min-h-screen">
-          <SiteHeader />
-          <main>{children}</main>
-        </div>
+        <ToastProvider>
+          <div className="min-h-screen">
+            <SiteHeader />
+            <main>{children}</main>
+          </div>
+        </ToastProvider>
       </body>
     </html>
   );
