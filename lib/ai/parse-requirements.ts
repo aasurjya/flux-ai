@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AiClient } from "./client";
 import { PARSE_REQUIREMENTS_SYSTEM } from "./prompts";
+import { buildUserMessage } from "./build-user-message";
 
 export class ParseRequirementsInputError extends Error {
   constructor(message: string) {
@@ -19,19 +20,18 @@ const ResponseSchema = z.object({
   requirements: z.array(z.string().min(8)).min(1).max(12)
 });
 
-function buildUserMessage(input: ParseRequirementsInput): string {
-  const lines: string[] = [
-    "# Customer brief",
-    input.prompt.trim(),
-    "",
-    "# Constraints",
-    input.constraints.length > 0 ? input.constraints.map((c) => `- ${c}`).join("\n") : "(none specified)"
+function formatUserMessage(input: ParseRequirementsInput): string {
+  const sections = [
+    { title: "Customer brief", text: input.prompt },
+    { title: "Constraints", items: input.constraints, emptyLabel: "(none specified)" },
+    ...(input.preferredParts && input.preferredParts.length > 0
+      ? [{ title: "Preferred parts", items: input.preferredParts }]
+      : [])
   ];
-  if (input.preferredParts && input.preferredParts.length > 0) {
-    lines.push("", "# Preferred parts", input.preferredParts.map((p) => `- ${p}`).join("\n"));
-  }
-  lines.push("", "Emit the requirements list via the emit_requirements tool.");
-  return lines.join("\n");
+  return buildUserMessage({
+    sections,
+    instruction: "Emit the requirements list via the emit_requirements tool."
+  });
 }
 
 function normalizeRequirements(raw: string[]): string[] {
@@ -58,7 +58,7 @@ export async function parseRequirements(
 
   const response = await client.callStructured({
     system: PARSE_REQUIREMENTS_SYSTEM,
-    user: buildUserMessage(input),
+    user: formatUserMessage(input),
     schema: ResponseSchema,
     schemaName: "emit_requirements",
     schemaDescription:

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import type { AiClient } from "./client";
+import { buildUserMessage } from "./build-user-message";
 import type { BomItem, CircuitBlock, ValidationIssue } from "@/types/project";
 
 /**
@@ -77,38 +78,25 @@ REPLACEMENT mechanism:
 
 Emit the improvements via the propose_design_improvements tool.`;
 
-function buildUserMessage(input: ImproveDesignInput): string {
-  const lines: string[] = [
-    "# Customer brief",
-    input.prompt.trim(),
-    "",
-    "# Constraints",
-    input.constraints.length > 0 ? input.constraints.map((c) => `- ${c}`).join("\n") : "(none)",
-    "",
-    "# Requirements",
-    input.requirements.map((r) => `- ${r}`).join("\n"),
-    "",
-    "# Current architecture",
-    input.architectureBlocks
-      .map((b) => `- ${b.label} (${b.kind}, id=${b.id}) → ${b.connections.join(", ") || "(no connections)"}`)
-      .join("\n"),
-    "",
-    "# Current BOM",
-    input.bom
-      .map((b) => `- ${b.designator}: ${b.name} (${b.package}, qty ${b.quantity}, ${b.status})`)
-      .join("\n"),
-    "",
-    "# Open validation issues"
-  ];
-  if (input.validations.length === 0) {
-    lines.push("(none currently flagged)");
-  } else {
-    for (const issue of input.validations) {
-      lines.push(`- [${issue.severity}] ${issue.title}: ${issue.detail}`);
-    }
-  }
-  lines.push("", "Propose improvements via the propose_design_improvements tool.");
-  return lines.join("\n");
+function formatUserMessage(input: ImproveDesignInput): string {
+  const archLines = input.architectureBlocks
+    .map((b) => `${b.label} (${b.kind}, id=${b.id}) → ${b.connections.join(", ") || "(no connections)"}`);
+  const bomLines = input.bom
+    .map((b) => `${b.designator}: ${b.name} (${b.package}, qty ${b.quantity}, ${b.status})`);
+  const issueLines = input.validations.length > 0
+    ? input.validations.map((v) => `[${v.severity}] ${v.title}: ${v.detail}`)
+    : undefined;
+  return buildUserMessage({
+    sections: [
+      { title: "Customer brief", text: input.prompt },
+      { title: "Constraints", items: input.constraints, emptyLabel: "(none)" },
+      { title: "Requirements", items: input.requirements },
+      { title: "Current architecture", items: archLines },
+      { title: "Current BOM", items: bomLines },
+      { title: "Open validation issues", items: issueLines ?? [], emptyLabel: "(none currently flagged)" }
+    ],
+    instruction: "Propose improvements via the propose_design_improvements tool."
+  });
 }
 
 function applyBomEdits(
@@ -195,7 +183,7 @@ export async function improveDesign(
 
   const response = await client.callStructured({
     system: SYSTEM_PROMPT,
-    user: buildUserMessage(input),
+    user: formatUserMessage(input),
     schema: ResponseSchema,
     schemaName: "propose_design_improvements",
     schemaDescription:

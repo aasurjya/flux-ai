@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AiClient } from "./client";
 import { SUGGEST_BOM_SYSTEM } from "./prompts";
+import { buildUserMessage } from "./build-user-message";
 import { architectureSummary } from "./generate-architecture";
 import type { BomItem, CircuitBlock } from "@/types/project";
 
@@ -28,19 +29,17 @@ export interface SuggestBomInput {
   preferredParts?: string[];
 }
 
-function buildUserMessage(input: SuggestBomInput): string {
-  const lines: string[] = [
-    "# Architecture blocks",
-    ...architectureSummary(input.architectureBlocks).map((line) => `- ${line}`),
-    "",
-    "# Constraints",
-    input.constraints.length > 0 ? input.constraints.map((c) => `- ${c}`).join("\n") : "(none specified)"
-  ];
-  if (input.preferredParts && input.preferredParts.length > 0) {
-    lines.push("", "# Preferred parts", input.preferredParts.map((p) => `- ${p}`).join("\n"));
-  }
-  lines.push("", "Emit the initial BOM via the emit_bom tool. Use needs_review when a specific part depends on info not yet provided.");
-  return lines.join("\n");
+function formatUserMessage(input: SuggestBomInput): string {
+  return buildUserMessage({
+    sections: [
+      { title: "Architecture blocks", items: architectureSummary(input.architectureBlocks) },
+      { title: "Constraints", items: input.constraints, emptyLabel: "(none specified)" },
+      ...(input.preferredParts && input.preferredParts.length > 0
+        ? [{ title: "Preferred parts", items: input.preferredParts }]
+        : [])
+    ],
+    instruction: "Emit the initial BOM via the emit_bom tool. Use needs_review when a specific part depends on info not yet provided."
+  });
 }
 
 function normalize(items: z.infer<typeof BomItemSchema>[]): BomItem[] {
@@ -74,7 +73,7 @@ export async function suggestBom(
 
   const response = await client.callStructured({
     system: SUGGEST_BOM_SYSTEM,
-    user: buildUserMessage(input),
+    user: formatUserMessage(input),
     schema: ResponseSchema,
     schemaName: "emit_bom",
     schemaDescription:

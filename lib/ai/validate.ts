@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AiClient } from "./client";
 import { VALIDATE_SYSTEM } from "./prompts";
+import { buildUserMessage } from "./build-user-message";
 import { architectureSummary } from "./generate-architecture";
 import type { BomItem, CircuitBlock, ValidationIssue } from "@/types/project";
 
@@ -22,22 +23,18 @@ export interface ValidateDesignInput {
   requirements: string[];
 }
 
-function buildUserMessage(input: ValidateDesignInput): string {
-  return [
-    "# Requirements",
-    input.requirements.map((r) => `- ${r}`).join("\n"),
-    "",
-    "# Constraints",
-    input.constraints.length > 0 ? input.constraints.map((c) => `- ${c}`).join("\n") : "(none specified)",
-    "",
-    "# Architecture",
-    ...architectureSummary(input.architectureBlocks).map((line) => `- ${line}`),
-    "",
-    "# Proposed BOM",
-    input.bom.map((b) => `- ${b.designator}: ${b.name} (${b.package}, qty ${b.quantity}, ${b.status})`).join("\n"),
-    "",
-    "Emit validation issues via the emit_validations tool. Prefer 2-6 specific, actionable items. Empty list if nothing is risky."
-  ].join("\n");
+function formatUserMessage(input: ValidateDesignInput): string {
+  const bomLines = input.bom
+    .map((b) => `${b.designator}: ${b.name} (${b.package}, qty ${b.quantity}, ${b.status})`);
+  return buildUserMessage({
+    sections: [
+      { title: "Requirements", items: input.requirements },
+      { title: "Constraints", items: input.constraints, emptyLabel: "(none specified)" },
+      { title: "Architecture", items: architectureSummary(input.architectureBlocks) },
+      { title: "Proposed BOM", items: bomLines }
+    ],
+    instruction: "Emit validation issues via the emit_validations tool. Prefer 2-6 specific, actionable items. Empty list if nothing is risky."
+  });
 }
 
 function normalize(issues: z.infer<typeof IssueSchema>[]): ValidationIssue[] {
@@ -65,7 +62,7 @@ export async function validateDesign(
 ): Promise<ValidationIssue[]> {
   const response = await client.callStructured({
     system: VALIDATE_SYSTEM,
-    user: buildUserMessage(input),
+    user: formatUserMessage(input),
     schema: ResponseSchema,
     schemaName: "emit_validations",
     schemaDescription:

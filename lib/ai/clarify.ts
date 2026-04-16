@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AiClient } from "./client";
 import { CLARIFY_SYSTEM } from "./prompts";
+import { buildUserMessage } from "./build-user-message";
 
 export interface ClarifyInput {
   prompt: string;
@@ -14,23 +15,15 @@ const ResponseSchema = z.object({
   questions: z.array(z.string().min(10)).max(6) // model may over-emit; we'll cap after
 });
 
-function buildUserMessage(input: ClarifyInput): string {
-  const constraints = input.constraints.length > 0
-    ? input.constraints.map((c) => `- ${c}`).join("\n")
-    : "(none specified)";
-  const requirements = input.requirements.map((r) => `- ${r}`).join("\n");
-  return [
-    "# Customer brief",
-    input.prompt.trim(),
-    "",
-    "# Constraints",
-    constraints,
-    "",
-    "# Extracted requirements",
-    requirements,
-    "",
-    "Emit clarifying questions via the emit_clarifying_questions tool. Return an empty list if none are needed."
-  ].join("\n");
+function formatUserMessage(input: ClarifyInput): string {
+  return buildUserMessage({
+    sections: [
+      { title: "Customer brief", text: input.prompt },
+      { title: "Constraints", items: input.constraints, emptyLabel: "(none specified)" },
+      { title: "Extracted requirements", items: input.requirements }
+    ],
+    instruction: "Emit clarifying questions via the emit_clarifying_questions tool. Return an empty list if none are needed."
+  });
 }
 
 function normalize(raw: string[]): string[] {
@@ -58,7 +51,7 @@ export async function clarifyRequirements(
 
   const response = await client.callStructured({
     system: CLARIFY_SYSTEM,
-    user: buildUserMessage(input),
+    user: formatUserMessage(input),
     schema: ResponseSchema,
     schemaName: "emit_clarifying_questions",
     schemaDescription:

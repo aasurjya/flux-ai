@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AiClient } from "./client";
 import { GENERATE_ARCHITECTURE_SYSTEM } from "./prompts";
+import { buildUserMessage } from "./build-user-message";
 import type { CircuitBlock, CircuitBlockKind } from "@/types/project";
 
 const KINDS: readonly CircuitBlockKind[] = [
@@ -31,25 +32,19 @@ export interface GenerateArchitectureInput {
   clarifyingAnswers?: Record<string, string>;
 }
 
-function buildUserMessage(input: GenerateArchitectureInput): string {
-  const lines: string[] = [
-    "# Customer brief",
-    input.prompt.trim(),
-    "",
-    "# Constraints",
-    input.constraints.length > 0 ? input.constraints.map((c) => `- ${c}`).join("\n") : "(none specified)",
-    "",
-    "# Requirements",
-    input.requirements.map((r) => `- ${r}`).join("\n")
-  ];
-  if (input.clarifyingAnswers && Object.keys(input.clarifyingAnswers).length > 0) {
-    lines.push("", "# Clarifying answers");
-    for (const [q, a] of Object.entries(input.clarifyingAnswers)) {
-      lines.push(`- Q: ${q}\n  A: ${a}`);
-    }
-  }
-  lines.push("", "Emit the block-level architecture via the emit_architecture tool.");
-  return lines.join("\n");
+function formatUserMessage(input: GenerateArchitectureInput): string {
+  const answersText = input.clarifyingAnswers && Object.keys(input.clarifyingAnswers).length > 0
+    ? Object.entries(input.clarifyingAnswers).map(([q, a]) => `- Q: ${q}\n  A: ${a}`).join("\n")
+    : undefined;
+  return buildUserMessage({
+    sections: [
+      { title: "Customer brief", text: input.prompt },
+      { title: "Constraints", items: input.constraints, emptyLabel: "(none specified)" },
+      { title: "Requirements", items: input.requirements },
+      ...(answersText ? [{ title: "Clarifying answers", text: answersText }] : [])
+    ],
+    instruction: "Emit the block-level architecture via the emit_architecture tool."
+  });
 }
 
 /**
@@ -79,7 +74,7 @@ export async function generateArchitecture(
 
   const response = await client.callStructured({
     system: GENERATE_ARCHITECTURE_SYSTEM,
-    user: buildUserMessage(input),
+    user: formatUserMessage(input),
     schema: ResponseSchema,
     schemaName: "emit_architecture",
     schemaDescription:
