@@ -69,7 +69,7 @@ export async function generateProject({
   const result = await runGenerationPipeline(ai, {
     prompt: project.prompt,
     constraints: project.constraints,
-    preferredParts: [], // TODO wire through from create form when needed
+    preferredParts: project.preferredParts ?? [],
     clarifyingAnswers: effectiveAnswers,
     onStage
   });

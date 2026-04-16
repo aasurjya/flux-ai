@@ -81,6 +81,7 @@ export function buildProjectFromInput(input: CreateProjectInput, existingProject
     status: "draft",
     updatedAt: new Date().toISOString(),
     constraints: normalizedConstraints,
+    preferredParts: input.preferredParts.length > 0 ? input.preferredParts : undefined,
     outputs: {
       requirements: [
         `Primary objective: ${input.prompt}`,

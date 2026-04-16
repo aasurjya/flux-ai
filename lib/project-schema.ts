@@ -124,6 +124,7 @@ export const ProjectSummarySchema = z.object({
   ]),
   updatedAt: z.string().max(40),
   constraints: z.array(safeStr(1, 200)).max(50),
+  preferredParts: z.array(safeStr(1, 120)).max(20).optional(),
   outputs: z.object({
     requirements: z.array(safeStr(1, 400)).max(50),
     architecture: z.array(safeStr(1, 400)).max(50),

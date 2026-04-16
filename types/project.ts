@@ -91,6 +91,7 @@ export interface ProjectSummary {
   status: ProjectStatus;
   updatedAt: string;
   constraints: string[];
+  preferredParts?: string[];
   outputs: {
     requirements: string[];
     architecture: string[];
