@@ -1,7 +1,7 @@
 # Current cycle — flux.ai
 
-**Cycle:** 6 shipped → cycle 7 queued
-**Focus (cycle 7):** Phase 8 — telemetry counters + /admin/stats gated view
+**Cycle:** 7 shipped — ALL 8 PHASES COMPLETE
+**Next:** Continuous improvement loop (Tier 1–4)
 
 ## Cycle 0 — bootstrap (2026-04-16) ✅
 
@@ -111,15 +111,25 @@ regex would have missed it.
 **Outcome:** The LLM can now say "swap U1 for ESP32-C6" and the change
 actually lands. Before, same-designator additions were silently dropped.
 
-## Cycle 7 — scheduled
+## Cycle 7 — Phase 8 shipped (2026-04-16) ✅
 
-**Goal:** Phase 8 — telemetry counters + `/admin/stats` gated view.
-**Entry criteria:** Cycle 6 committed; green gates.
-**Rationale:** Six phases shipped, zero measurement. Every KPI in
-`.jarvis-org/state/KPIs.md` is "unmeasured / qualitative only". The
-next new feature has to instrument itself, or we're building blind.
-File-based counter (no network), admin view gated behind
-`FLUX_ADMIN_TOKEN` so the counters don't leak to unauthenticated users.
+**Goal:** Instrument what we can't guess — file-based telemetry + gated admin.
+
+- [x] `lib/telemetry.ts` — `track(event)` + `readCounters()`, file-based, best-effort (never throws)
+- [x] `lib/telemetry.test.ts` — 4 tests (persist, independent, empty, no-throw-on-failure)
+- [x] `app/admin/stats/page.tsx` — gated by `FLUX_ADMIN_TOKEN` env var, renders counter cards
+- [x] Wired track() into 6 server-side touch-points:
+  - `project.created` (createProject)
+  - `pipeline.completed` (generateProject on complete result)
+  - `bom.edited` (patchBomItem)
+  - `validation.dismissed` (setValidationDismissal)
+  - `improve.clicked` (runImproveDesign)
+  - `export.downloaded` (runExportJob on success)
+- [x] Full regression: 227 unit + 42 E2E green, build exit 0
+
+**Outcome:** After two weeks of real use, we'll know which features
+deserve further investment and which are ignored. Every KPI in
+KPIs.md is now instrumentable.
 
 ## Cycle log
 
@@ -131,4 +141,7 @@ Each run of `/jarvis-cycle` appends here.
 - Cycle 3: Phase 3 (dismiss validations) shipped — 2026-04-16 (8567092)
 - Cycle 4: Phase 4 (SSE streaming) shipped — 2026-04-16 (5bb68e8)
 - Cycle 5: Phase 6 (structured BOM fields) shipped — 2026-04-16 (954b0e3)
-- Cycle 6: Phase 7 (improve-design replacements) shipped — 2026-04-16 (pending commit)
+- Cycle 6: Phase 7 (improve-design replacements) shipped — 2026-04-16 (b33127b)
+- Cycle 7: Phase 8 (telemetry + admin stats) shipped — 2026-04-16 (pending commit)
+
+🎉 ALL 8 PHASES SHIPPED IN 7 CYCLES (P5 SQLite deferred by CEO decision)

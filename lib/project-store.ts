@@ -13,6 +13,7 @@ import { improveDesign } from "@/lib/ai/improve-design";
 import { runDesignRules } from "@/lib/ai/design-rules";
 import { carryDismissalsForward } from "@/lib/ai/carry-dismissals";
 import { buildKicadExport } from "@/lib/kicad/bundle";
+import { track } from "@/lib/telemetry";
 
 /**
  * In-process promise-chain mutex. Every mutating call routes through
@@ -237,6 +238,7 @@ export async function createProject(input: CreateProjectInput) {
     const project = buildProjectFromInput(input, [...storedProjects, ...mockProjects]);
     storedProjects.unshift(project);
     await writeStoredProjects(storedProjects);
+    void track("project.created");
     return project;
   });
 }
@@ -316,6 +318,7 @@ export async function setValidationDismissal(input: {
     };
     storedProjects[projectIndex] = updated;
     await writeStoredProjects(storedProjects);
+    if (input.reason !== null) void track("validation.dismissed");
     return updated;
   });
 }
@@ -414,6 +417,7 @@ export async function patchBomItem(input: {
     };
     storedProjects[projectIndex] = updated;
     await writeStoredProjects(storedProjects);
+    void track("bom.edited");
     return updated;
   });
 }
@@ -634,6 +638,7 @@ export async function runImproveDesign({
     };
     latestStored[latestIndex] = updated;
     await writeStoredProjects(latestStored);
+    void track("improve.clicked");
     return updated;
   });
 }
@@ -767,6 +772,7 @@ export async function generateProject({
 
     storedProjects[projectIndex] = updated;
     await writeStoredProjects(storedProjects);
+    void track("pipeline.completed");
     return updated;
   });
 }
@@ -994,6 +1000,7 @@ export async function runExportJob(projectId: string, jobId: string) {
       exportJobs: updatedJobs
     };
     await writeStoredProjects(latestStored);
+    if (!failureMessage) void track("export.downloaded");
     return finalJob;
   });
 }
