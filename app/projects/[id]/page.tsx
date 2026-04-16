@@ -10,6 +10,7 @@ import { AiWorkflowStages } from "@/components/ai-workflow-stages";
 import { CircuitGraph } from "@/components/circuit-graph";
 import { ExportJobCard } from "@/components/export-job-card";
 import { RevisionCompare } from "@/components/revision-compare";
+import { BomEditorRow } from "./bom-editor-row";
 import { formatRelative } from "@/lib/format-relative";
 import { getProjectById, generateProject, createExportJob, runExportJob, runImproveDesign } from "@/lib/project-store";
 import { AnswerQuestionsForm } from "./answer-questions-form";
@@ -342,23 +343,14 @@ export default async function ProjectWorkspacePage({
             <Card className="border-border/60 bg-card/60">
               <CardHeader>
                 <CardTitle>Starter BOM</CardTitle>
-                <CardDescription>Selected and review-required parts for the current revision.</CardDescription>
+                <CardDescription>
+                  Click the pencil on any row to edit name, quantity, package, or status in-place.
+                  Each edit creates a new revision.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 {currentProject.outputs.bom.map((item) => (
-                  <div key={item.id} className="rounded-xl border border-border/70 bg-background/30 p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="font-medium text-foreground">{item.designator} — {item.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Qty {item.quantity} · {item.package}
-                        </p>
-                      </div>
-                      <Badge variant={item.status === "needs_review" ? "warning" : "secondary"}>
-                        {item.status.replaceAll("_", " ")}
-                      </Badge>
-                    </div>
-                  </div>
+                  <BomEditorRow key={item.id} projectId={currentProject.id} item={item} />
                 ))}
               </CardContent>
             </Card>

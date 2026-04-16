@@ -240,6 +240,90 @@ export async function createProject(input: CreateProjectInput) {
   });
 }
 
+/**
+ * Patch a single BOM row. Used by the inline-edit UI so users don't
+ * need to round-trip through the AI for every BOM correction. The
+ * designator is the identity key — this function never renames it.
+ * Creates a revision explaining the edit, with a snapshot for the
+ * compare view.
+ */
+export async function patchBomItem(input: {
+  projectId: string;
+  designator: string;
+  patch: {
+    name?: string;
+    quantity?: number;
+    package?: string;
+    status?: "selected" | "alternate" | "needs_review";
+  };
+}): Promise<ProjectSummary> {
+  return withStoreLock(async () => {
+    const storedProjects = await readStoredProjects();
+    const projectIndex = storedProjects.findIndex((p) => p.id === input.projectId);
+    if (projectIndex === -1) {
+      throw new Error(`Project not found: ${input.projectId}`);
+    }
+    const project = storedProjects[projectIndex];
+    const itemIndex = project.outputs.bom.findIndex((b) => b.designator === input.designator);
+    if (itemIndex === -1) {
+      throw new Error(`BOM item not found: ${input.designator}`);
+    }
+    const before = project.outputs.bom[itemIndex];
+    // Merge: designator + id are preserved; only user-editable fields move.
+    const after = {
+      ...before,
+      ...("name" in input.patch ? { name: input.patch.name! } : {}),
+      ...("quantity" in input.patch ? { quantity: input.patch.quantity! } : {}),
+      ...("package" in input.patch ? { package: input.patch.package! } : {}),
+      ...("status" in input.patch ? { status: input.patch.status! } : {})
+    };
+    const nextBom = [...project.outputs.bom];
+    nextBom[itemIndex] = after;
+
+    // Human-readable diff of what changed for the revision record.
+    const changedFields: string[] = [];
+    if (input.patch.name !== undefined && before.name !== after.name) {
+      changedFields.push(`name: "${before.name}" → "${after.name}"`);
+    }
+    if (input.patch.quantity !== undefined && before.quantity !== after.quantity) {
+      changedFields.push(`quantity: ${before.quantity} → ${after.quantity}`);
+    }
+    if (input.patch.package !== undefined && before.package !== after.package) {
+      changedFields.push(`package: "${before.package}" → "${after.package}"`);
+    }
+    if (input.patch.status !== undefined && before.status !== after.status) {
+      changedFields.push(`status: ${before.status} → ${after.status}`);
+    }
+
+    const updatedOutputs = { ...project.outputs, bom: nextBom };
+    const revision = {
+      id: `rev-${randomUUID()}`,
+      title: `Edited ${input.designator}`,
+      description:
+        changedFields.length > 0
+          ? `Inline BOM edit: ${changedFields.join("; ")}.`
+          : "Inline BOM edit: no field changes (noop).",
+      createdAt: new Date().toISOString(),
+      changes: changedFields.length > 0 ? changedFields : ["No fields changed"],
+      snapshot: {
+        bom: nextBom,
+        validations: project.outputs.validations,
+        architectureBlocks: project.outputs.architectureBlocks
+      }
+    };
+
+    const updated: ProjectSummary = {
+      ...project,
+      updatedAt: new Date().toISOString(),
+      outputs: updatedOutputs,
+      revisions: [revision, ...project.revisions]
+    };
+    storedProjects[projectIndex] = updated;
+    await writeStoredProjects(storedProjects);
+    return updated;
+  });
+}
+
 export async function deleteProject(projectId: string): Promise<boolean> {
   return withStoreLock(async () => {
     const storedProjects = await readStoredProjects();

@@ -10,22 +10,21 @@ signal. When signal is absent, it mirrors the phase plan.
 
 ## Next (committed this cycle)
 
-### 1. Wire KiCad schematic (Phase 1 of the plan)
-**Score:** 9/10
-**Evidence:** Both review agents (socratic-challenger + product-intel)
-flagged this as the single biggest credibility leak. No telemetry yet;
-escalating on qualitative signal.
+### 1. Dismiss validations (Phase 3 of the plan)
+**Score:** 8/10
+**Evidence:** Standard capability in every linter (ESLint, RuboCop,
+Pylint). Currently our validator re-fires the same warnings every
+improve-design cycle; users will learn to ignore the panel and real
+signals get lost in the noise.
 **Owner:** tdd-guide (dev) + architect (review)
 **Story:** see below.
 
 ## Up next (ordered, not committed this cycle)
 
-2. **BOM inline editing** (Phase 2) — evidence: "users must accept or re-run AI" friction flagged by product-intel
-3. **Dismiss validations** (Phase 3) — evidence: noise drowns signal; standard in every linter
-4. **Streaming generation progress** (Phase 4) — evidence: 30s blank wait is classic abandonment
-5. **Rules read structured fields** (Phase 6) — evidence: regex-on-prose fragility unmeasured
-6. **Improve-design replacement support** (Phase 7) — evidence: silent-skip bug on same-designator additions
-7. **Telemetry + `/admin/stats`** (Phase 8) — evidence: we're flying blind on all KPIs
+2. **Streaming generation progress** (Phase 4) — evidence: 30s blank wait is classic abandonment
+3. **Rules read structured fields** (Phase 6) — evidence: regex-on-prose fragility unmeasured
+4. **Improve-design replacement support** (Phase 7) — evidence: silent-skip bug on same-designator additions
+5. **Telemetry + `/admin/stats`** (Phase 8) — evidence: we're flying blind on all KPIs
 
 ## Parking lot
 
@@ -38,30 +37,33 @@ escalating on qualitative signal.
 
 None yet (cycle 0).
 
+## Shipped in earlier cycles
+
+- **Cycle 1 — Phase 1 KiCad net labels + power symbols** ✅ (commit f26c3f1)
+- **Cycle 2 — Phase 2 inline BOM editing** ✅ (this cycle)
+
 ## Stories
 
-### 1. Wire KiCad schematic with net labels + power symbols
+### 1. Dismiss validation issues with reason
 
-**As an** indie hardware engineer opening my first flux.ai-generated `.kicad_sch`
-**I want** to see blocks connected by visible labeled nets (VCC_3V3, I2C_BUS, SWD, …)
-**So that** I don't see scattered rectangles and close the tab immediately.
+**As a** hardware engineer working through a list of validation warnings
+**I want** to dismiss issues I've accepted as known trade-offs (with a brief reason)
+**So that** the next generate / improve cycle doesn't re-fire them as noise, and real problems stay visible.
 
 **Acceptance criteria:**
-- [ ] Every unique edge in `architectureBlocks[].connections` emits a KiCad `(global_label "NET_NAME" …)` at both endpoints
-- [ ] Net name reuses the semantic logic already in `lib/kicad/netlist-gen.ts:netNameFor` (VCC_3V3 / VBUS_IN / I2C_BUS / SPI_BUS / UART / SWD / …)
-- [ ] Power-kind blocks render with a KiCad stdlib `(power …)` symbol (`power:+3V3`, `power:GND`, `power:+5V`, `power:VBUS`) in addition to their placed lib symbol
-- [ ] `lib/kicad/sexp.ts` gains helpers for `global_label` and power-symbol placement
-- [ ] Existing `lib/kicad/schematic-gen.test.ts` passes; 3+ new tests for label emission + power symbol placement
-- [ ] `npx playwright test` still green
-- [ ] Coverage thresholds hold (80% lines / 75% branches)
-- [ ] Open the generated `.kicad_sch` in KiCad 8 manually (user verification) — no red no-connect markers
+- [ ] `ValidationIssue` type gains optional `dismissed?: { at: string; reason: string }` field
+- [ ] `ValidationIssueSchema` updated in `lib/project-schema.ts` (back-compat: field is optional)
+- [ ] New server action on workspace: `dismissValidationAction` takes validation id + reason, mutates outputs.validations, creates a revision explaining the dismissal
+- [ ] UI: active issues show a "Dismiss…" affordance that opens a small reason textarea; dismissed issues collapse into a "Dismissed (N)" section with a "Re-enable" button
+- [ ] `runDesignRules` respects prior dismissals: a rule that fired and was dismissed shouldn't re-fire on the next run UNLESS the underlying BOM / architecture changed in a way that would make the rule fire for a different reason. Identity key = `rule + slug(title)`.
+- [ ] Tests: unit — dismiss persists across `runDesignRules` re-runs when state unchanged; dismiss invalidates when underlying BOM changes. E2E — dismiss a validation, run improve-design, confirm it stays dismissed.
+- [ ] Coverage thresholds hold.
 
 **Out of scope:**
-- Actual routed wire geometry between symbols (labels connect by name; KiCad's ERC is happy)
-- Pin-level footprint assignment
-- Multi-sheet hierarchy
+- Bulk-dismiss UI (one at a time is fine for MVP)
+- Dismiss-suggestion from the AI itself (could be a Phase 4 follow-up)
 
 **Evidence / references:**
-- product-intel Session 2 improvement-plan, finding #2
-- socratic-challenger Session 2, question #3 ("what does KiCad-ready actually mean?")
-- Plan file Phase 1
+- product-intel Session 2 improvement-plan, finding #5
+- Standard linter pattern (ESLint rule disable, RuboCop rubocop:disable, TS ts-expect-error)
+- Plan file Phase 3

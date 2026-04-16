@@ -60,6 +60,36 @@ Changes:
 Cycle 2 — Phase 2 (inline BOM editing). Same cycle structure.
 Phases 3-8 queued per the approved plan.
 
+### Cycle 2 — Phase 2 shipped (same day)
+
+**Scope:** Inline BOM editing with revision trail. Users can edit
+name / quantity / package / status of any BOM row in-place without
+round-tripping through the AI. Every edit creates a revision with a
+human-readable diff (`status: needs_review → selected`).
+
+Changes:
+- `app/api/projects/[id]/bom/[designator]/route.ts` — new PATCH
+  route. Zod `.strict()` partial schema rejects unknown fields at
+  the schema layer (R12 rule: URL is the identity source of truth,
+  body can't rewrite it).
+- `lib/project-store.ts` — `patchBomItem()` with `withStoreLock`,
+  builds human-readable change list, creates revision + snapshot.
+- `app/projects/[id]/bom-editor-row.tsx` — new client component.
+  Pencil → inline edit → Enter/Save / Escape/Cancel. No-op saves
+  exit early (R11 rule). Keyboard-accessible end to end.
+- `e2e/bom-edit.spec.ts` — 2 tests (happy-path creates revision;
+  Cancel discards).
+
+Gates: 204 unit + 38 E2E green. Build exit 0. Coverage thresholds
+hold.
+
+Durable rules added:
+- **R11** — No-op edits must exit early on both client and server.
+- **R12** — Zod `.strict()` rejects hijack attempts at the schema
+  layer (URL is the identity key; body can't rewrite it).
+
+Next: Cycle 3 — Phase 3 (dismiss validations).
+
 ---
 
 ## Session 2 — 2026-04-15 (continuous improvement)
