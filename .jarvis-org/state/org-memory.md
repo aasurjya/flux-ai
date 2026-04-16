@@ -54,6 +54,39 @@ and is gated behind budget guardrails.
 server/client render window. Always suppress hydration warning at the
 text node.
 
+### R9 — KiCad artifact changes need manual open-test in KiCad 8
+**Source:** Org Cycle 1 (Phase 1 ship).
+**Rule:** "Tests pass" is necessary but not sufficient for any file
+that ends up in the generated .zip. The acceptance bar for KiCad
+artifact changes is a human opening the file in KiCad 8 and confirming
+no red ERC markers. Unit tests confirm the bytes; KiCad confirms the
+semantics.
+
+### R10 — Shared helpers between KiCad modules must be exported, not duplicated
+**Source:** Org Cycle 1 refactor during Phase 1.
+**Rule:** When `schematic-gen` and `netlist-gen` both need to compute
+a net name, the helper lives in one file and is exported. Don't
+copy-paste — divergence is guaranteed over time.
+
+### R11 — No-op edits must exit early on both client and server
+**Source:** Org Cycle 2 (Phase 2 BOM editing).
+**Rule:** When an "edit" touches no fields (user clicked Save without
+changing anything), both client and server MUST short-circuit before
+creating a revision. Empty revisions pollute history and the compare
+view. The client detects via `Object.keys(patch).length === 0` and
+just closes edit mode. The server records only the fields that
+actually differ from `before`.
+
+### R12 — Zod `.strict()` rejects hijack attempts at the schema layer
+**Source:** Org Cycle 2. Initially the PATCH body was loose
+(`.partial()`) and a malicious payload with `designator: "HIJACKED"`
+would have overwritten the stable identity key.
+**Rule:** For any patch route where the URL provides a stable identity
+key, reject unknown fields at the schema level via `.strict()`. The
+URL is the identity source of truth; the body never rewrites it.
+Test-case required: payload attempts to change an identity field, row
+retains original value.
+
 ## Failed experiments (do not repeat)
 
 ### F1 — Mock-project deletion

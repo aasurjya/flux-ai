@@ -80,3 +80,41 @@ second-biggest friction point in the product-intel audit.
 Deferred again: SQLite migration (Phase 5). Zero production users =
 zero concurrency pressure. Will revisit when a second real user
 appears.
+
+---
+
+## 2026-04-16 — Cycle 2 closing review
+
+### What shipped
+Phase 2 — inline BOM editing with revision trail.
+
+Commit: 3f01c29.
+Files:
+- `app/api/projects/[id]/bom/[designator]/route.ts` — PATCH route with
+  Zod `.strict()` partial schema. Rejects unknown fields (including
+  attempts to hijack the designator via the body).
+- `lib/project-store.ts patchBomItem()` — `withStoreLock`, merges only
+  user-editable fields, builds human-readable change list, creates
+  revision + snapshot.
+- `app/projects/[id]/bom-editor-row.tsx` — client component. Pencil
+  → Enter saves, Escape cancels. No-op saves exit early.
+- 6 route unit tests + 2 E2E tests.
+
+### Gate outcomes
+- Unit: 204 / 204 green (+6). Was 198.
+- E2E: 38 / 38 green (+2). Was 36.
+- Build: exit 0.
+- Coverage: thresholds hold.
+
+### Did it move a KPI?
+Not yet (Phase 8 telemetry not shipped). Qualitative: the "forced to
+re-run AI for every BOM correction" friction from the product-intel
+audit is gone.
+
+### Org-memory updates
+- **R11** — No-op edits must exit early on both client and server.
+- **R12** — Zod `.strict()` rejects hijack attempts at the schema layer.
+
+### Next cycle (Cycle 3) direction
+Phase 3 — dismiss validation issues. Users need to silence known
+trade-offs or the validator panel becomes ignored noise.
