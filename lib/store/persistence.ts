@@ -32,7 +32,27 @@ export function isFileNotFoundError(error: unknown): error is { code: string } {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
+// In-memory cache: avoids re-reading + re-parsing the JSON file on
+// every getProjectById call. Invalidated by writeStoredProjects.
+let cachedProjects: ProjectSummary[] | null = null;
+let projectIndex: Map<string, number> | null = null;
+
+function buildIndex(projects: ProjectSummary[]): Map<string, number> {
+  const idx = new Map<string, number>();
+  for (let i = 0; i < projects.length; i++) {
+    idx.set(projects[i].id, i);
+  }
+  return idx;
+}
+
+function invalidateCache() {
+  cachedProjects = null;
+  projectIndex = null;
+}
+
 export async function readStoredProjects(): Promise<ProjectSummary[]> {
+  if (cachedProjects) return cachedProjects;
+
   try {
     const fileContents = await fs.readFile(getProjectsFilePath(), "utf8");
     const raw = JSON.parse(fileContents);
@@ -50,6 +70,8 @@ export async function readStoredProjects(): Promise<ProjectSummary[]> {
         );
       }
     }
+    cachedProjects = valid;
+    projectIndex = buildIndex(valid);
     return valid;
   } catch (error) {
     if (isFileNotFoundError(error)) return [];
@@ -65,6 +87,7 @@ export async function readStoredProjects(): Promise<ProjectSummary[]> {
 }
 
 export async function writeStoredProjects(projects: ProjectSummary[]) {
+  invalidateCache();
   // Atomic write via temp + rename. Avoids truncating the real file
   // mid-write on crash / SIGTERM / out-of-disk.
   const filePath = getProjectsFilePath();
@@ -88,9 +111,17 @@ export async function getProjects() {
 }
 
 export async function getProjectById(id: string) {
-  const projects = await getProjects();
+  const storedProjects = await readStoredProjects();
 
-  return projects.find((project) => project.id === id);
+  // O(1) lookup via in-memory index (populated by readStoredProjects)
+  if (projectIndex) {
+    const idx = projectIndex.get(id);
+    if (idx !== undefined) return storedProjects[idx];
+  }
+
+  // Fallback: check mock projects (small array, linear scan is fine)
+  const mock = mockProjects.find((p) => p.id === id);
+  return mock;
 }
 
 /** Small helper so every revision that creates a snapshot does it the same way. */

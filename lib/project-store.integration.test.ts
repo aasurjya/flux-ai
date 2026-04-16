@@ -369,4 +369,29 @@ describe("runExportJob integration", () => {
     // The very oldest must be gone
     expect(stats[0]).toBe(false);
   });
+
+  it("getProjectById is fast after cache warms up (O(1) index lookup)", async () => {
+    // Create 50 projects to make the difference measurable
+    const ids: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const p = await createProject({
+        name: `Perf test ${i}`,
+        prompt: `testing perf ${i}`,
+        constraints: [],
+        preferredParts: []
+      });
+      ids.push(p.id);
+    }
+
+    // Lookup the last project (worst case for linear scan) — should be fast
+    const lastId = ids[ids.length - 1];
+    const start = performance.now();
+    const found = await getProjectById(lastId);
+    const elapsed = performance.now() - start;
+
+    expect(found).toBeDefined();
+    expect(found!.id).toBe(lastId);
+    // With 50 projects and in-memory cache, should be well under 50ms
+    expect(elapsed).toBeLessThan(50);
+  });
 });
