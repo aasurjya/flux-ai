@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Loader2, Circle } from "lucide-react";
+import { Check, Loader2, Circle, AlertCircle } from "lucide-react";
 
 type StageStatus = "pending" | "running" | "completed" | "error";
 
@@ -38,6 +38,7 @@ export function AiWorkflowStages({ stages, currentStage }: AiWorkflowStagesProps
             const isActive = stage.id === currentStage;
             const isCompleted = stage.status === "completed";
             const isRunning = stage.status === "running";
+            const isError = stage.status === "error";
 
             return (
               <div key={stage.id} className="flex items-start gap-4">
@@ -47,13 +48,17 @@ export function AiWorkflowStages({ stages, currentStage }: AiWorkflowStagesProps
                       ? "border-primary bg-primary text-primary-foreground"
                       : isRunning
                         ? "border-primary bg-primary/20 text-primary"
-                        : "border-border bg-background text-muted-foreground"
+                        : isError
+                          ? "border-rose-400 bg-rose-400/20 text-rose-400"
+                          : "border-border bg-background text-muted-foreground"
                   }`}
                 >
                   {isCompleted ? (
                     <Check className="h-4 w-4" />
                   ) : isRunning ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isError ? (
+                    <AlertCircle className="h-4 w-4" />
                   ) : (
                     <Circle className="h-4 w-4" />
                   )}
@@ -62,7 +67,7 @@ export function AiWorkflowStages({ stages, currentStage }: AiWorkflowStagesProps
                   <div className="flex items-center gap-2">
                     <p
                       className={`font-medium ${
-                        isActive || isCompleted ? "text-foreground" : "text-muted-foreground"
+                        isActive || isCompleted || isError ? "text-foreground" : "text-muted-foreground"
                       }`}
                     >
                       {stage.label}
@@ -70,6 +75,11 @@ export function AiWorkflowStages({ stages, currentStage }: AiWorkflowStagesProps
                     {isRunning && (
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
                         Running...
+                      </span>
+                    )}
+                    {isError && (
+                      <span className="rounded-full bg-rose-400/10 px-2 py-0.5 text-xs text-rose-400">
+                        Failed
                       </span>
                     )}
                   </div>
