@@ -1,7 +1,7 @@
 # Current cycle — flux.ai
 
-**Cycle:** 3 shipped → cycle 4 queued
-**Focus (cycle 4):** Phase 4 — streaming generation via SSE
+**Cycle:** 4 shipped → cycle 5 queued
+**Focus (cycle 5):** Phase 6 — rules read structured BomItem fields (value, mpn)
 
 ## Cycle 0 — bootstrap (2026-04-16) ✅
 
@@ -58,13 +58,31 @@ revision. Biggest pre-export friction eliminated.
 generate AND improve cycles. Signal-to-noise of the validation panel
 restored.
 
-## Cycle 4 — scheduled
+## Cycle 4 — Phase 4 shipped (2026-04-16) ✅
 
-**Goal:** Phase 4 — streaming generation via SSE.
-**Entry criteria:** Cycle 3 committed; green gates.
-**Rationale:** 5-stage AI pipeline takes ~30s with a single generic
-spinner. Users don't know if it's working or stuck. Ship SSE so
-"Parsing requirements ✓ / Extracting architecture…" narrates progress.
+**Goal:** Narrate the AI pipeline live via SSE instead of a blank 30s wait.
+
+- [x] `onStage` callback on pipeline, `withStage` wrapper emits running/completed/error per stage
+- [x] SSE route `app/api/projects/[id]/generate-stream/route.ts` (text/event-stream)
+- [x] 3 unit tests (invalid id, full sequence, error path)
+- [x] `GenerateStreamingButton` client component with live stage dropdown
+- [x] Graceful fallback to classic form submit when EventSource unreachable
+- [x] Page.tsx: replaced Generate form with streaming button
+- [x] 2 E2E tests (SSE network assertion + disabled-during-pending)
+- [x] Full regression: 214 unit + 42 E2E green, build exit 0
+- [x] Org-memory: R15 (SSE id validation), R16 (revalidatePath in tests)
+
+**Outcome:** User sees per-stage progress within ~100ms of clicking
+Generate instead of a blank "Generating..." button for 30s.
+
+## Cycle 5 — scheduled
+
+**Goal:** Phase 6 — design rules read structured BOM fields (value, mpn).
+**Entry criteria:** Cycle 4 committed; green gates.
+**Rationale:** Current regex-on-prose rules are fragile. `/100nF/` matches
+"100nF" but misses "0.1µF MLCC X7R 0402" (same part). Add `value?`/`mpn?`
+to `BomItem` schema, have the BOM prompt emit them, rewrite rules to
+check structured fields. Regex fallback preserves behavior on old projects.
 
 ## Cycle log
 
@@ -73,4 +91,5 @@ Each run of `/jarvis-cycle` appends here.
 - Cycle 0: bootstrap (agents + state + command) — 2026-04-16
 - Cycle 1: Phase 1 (KiCad wires) shipped — 2026-04-16 (f26c3f1)
 - Cycle 2: Phase 2 (inline BOM editing) shipped — 2026-04-16 (3f01c29)
-- Cycle 3: Phase 3 (dismiss validations) shipped — 2026-04-16 (pending commit)
+- Cycle 3: Phase 3 (dismiss validations) shipped — 2026-04-16 (8567092)
+- Cycle 4: Phase 4 (SSE streaming) shipped — 2026-04-16 (pending commit)

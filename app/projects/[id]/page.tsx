@@ -13,6 +13,7 @@ import { RevisionCompare } from "@/components/revision-compare";
 import { BomEditorRow } from "./bom-editor-row";
 import { DismissValidationForm } from "./dismiss-validation-form";
 import { ReenableValidationForm } from "./reenable-validation-form";
+import { GenerateStreamingButton } from "./generate-streaming-button";
 import { formatRelative } from "@/lib/format-relative";
 import { getProjectById, generateProject, createExportJob, runExportJob, runImproveDesign, setValidationDismissal } from "@/lib/project-store";
 import { AnswerQuestionsForm } from "./answer-questions-form";
@@ -167,12 +168,13 @@ export default async function ProjectWorkspacePage({
               return (
                 <>
                   {showGenerate && (
-                    <form action={generateAction} className="contents">
-                      <input type="hidden" name="projectId" value={currentProject.id} />
-                      <SubmitButton pendingLabel="Generating design...">
-                        {isGenerating ? "Continue generation" : "Generate design"}
-                      </SubmitButton>
-                    </form>
+                    <div className="relative">
+                      <GenerateStreamingButton
+                        projectId={currentProject.id}
+                        fallbackAction={generateAction}
+                        isGenerating={isGenerating}
+                      />
+                    </div>
                   )}
                   {hasDesign && (
                     <>

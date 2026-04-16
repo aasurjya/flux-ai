@@ -621,6 +621,13 @@ interface GenerateProjectInput {
   projectId: string;
   clarifyingAnswers?: Record<string, string>;
   client?: AiClient; // injected in tests
+  /**
+   * Optional progress hook threaded straight through to the pipeline.
+   * SSE route uses this to stream running/completed events per stage
+   * while the generation runs. Leaving it undefined preserves the
+   * original synchronous semantics used by the existing server action.
+   */
+  onStage?: import("@/lib/ai/pipeline").OnStage;
 }
 
 /**
@@ -646,7 +653,8 @@ function selectPipelineClient(): AiClient {
 export async function generateProject({
   projectId,
   clarifyingAnswers,
-  client
+  client,
+  onStage
 }: GenerateProjectInput): Promise<ProjectSummary> {
   // Read project inside the lock, then release the lock while the LLM
   // call runs (can be 30s+), then re-acquire to persist the result.
@@ -664,7 +672,8 @@ export async function generateProject({
     prompt: project.prompt,
     constraints: project.constraints,
     preferredParts: [], // TODO wire through from create form when needed
-    clarifyingAnswers: effectiveAnswers
+    clarifyingAnswers: effectiveAnswers,
+    onStage
   });
 
   return withStoreLock(async () => {

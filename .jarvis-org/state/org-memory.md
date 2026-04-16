@@ -107,6 +107,25 @@ is otherwise lost. Match strategy: prefer stable id; fall back to
 content-shape tuple like `(severity, title)` for items whose id the
 LLM regenerates. Test both the id-match path AND the fallback path.
 
+### R15 — SSE/streaming routes still need input validation
+**Source:** Org Cycle 4 — `generate-stream` route.
+**Rule:** An SSE endpoint returns 200 headers almost immediately and
+narrates progress in the body, so there's a temptation to skip the
+usual "validate early, 400 on bad input" step. Don't. Path params
+flow into `revalidatePath` and store lookups that the SSE body will
+invoke; validate the shape (`/^[a-zA-Z0-9_-]+$/`) BEFORE opening the
+stream, so traversal-shaped ids are rejected at the HTTP boundary.
+
+### R16 — `revalidatePath` throws without a Next static-generation store
+**Source:** Org Cycle 4 — SSE route unit tests.
+**Rule:** Calling `revalidatePath` inside a route handler works in a
+real Next request, but throws "Invariant: static generation store
+missing" in Vitest. For routes where the revalidation is a
+nice-to-have (SSE that already drives client-side router.refresh),
+wrap in a narrow try/catch so unit tests can exercise the route body
+without a full Next request context. Never silently swallow in
+production-only code paths.
+
 ## Failed experiments (do not repeat)
 
 ### F1 — Mock-project deletion

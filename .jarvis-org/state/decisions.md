@@ -161,3 +161,69 @@ dismissals.
 
 Deferred again: Phase 5 (SQLite). Still zero users; still no
 concurrency pressure. Revisit when second real user appears.
+
+---
+
+## 2026-04-16 — Cycle 4 closing review
+
+### What shipped
+Phase 4 — streaming generation via SSE.
+
+Files:
+- `lib/ai/pipeline.ts` — new `OnStage` callback type; each stage wrapped
+  with `withStage` helper that emits `running` → `completed`/`error`.
+  Sync semantics preserved — caller that passes no onStage gets
+  unchanged behavior.
+- `lib/project-store.ts` — `generateProject` accepts optional `onStage`
+  and threads it to the pipeline.
+- `app/api/projects/[id]/generate-stream/route.ts` — NEW. GET returns
+  `text/event-stream`. Each stage produces a `stage` event; final
+  `done` or `error` event closes the stream. ID validated against
+  `[a-zA-Z0-9_-]+` before use (defence-in-depth).
+- `app/api/projects/[id]/generate-stream/route.test.ts` — 3 unit tests
+  (invalid id, full pipeline event sequence, unknown project error).
+- `app/projects/[id]/generate-streaming-button.tsx` — NEW client
+  component. Opens EventSource, renders a live "Parsing requirements
+  ✓ / Extracting architecture…" dropdown beside the button, and
+  router.refresh() on done. Falls back to classic server-action form
+  submit if EventSource never receives a single event (corp-proxy
+  unreachable case).
+- `app/projects/[id]/page.tsx` — Replaced the Generate `<form>` with
+  `<GenerateStreamingButton>`.
+- `e2e/streaming-generate.spec.ts` — 2 E2E tests: SSE response is
+  verified at the network layer (content-type text/event-stream +
+  status panel visible within 2s), and "Generating..." state disables
+  the button.
+
+### Gate outcomes
+- Unit: 214 / 214 green (+5). Was 209.
+- E2E: 42 / 42 green (+2). Was 40.
+- Build: exit 0.
+- Coverage: thresholds hold.
+
+### Did it move a KPI?
+Phase 8 still not shipped, so no direct telemetry. Qualitative: the
+"30s blank wait" classic-abandonment pattern is gone. Users see per-
+stage progress within ~100ms of clicking Generate.
+
+### Org-memory updates
+- **R15** — SSE route must validate the path param before use. Even
+  though SSE never exits on 4xx after the initial header, the id flows
+  into `revalidatePath` and store lookups. Reject early with 400 on
+  shape mismatch.
+- **R16** — `revalidatePath` throws in unit tests without a Next.js
+  static-generation store. Wrap in a try/catch when the route is
+  primarily useful for browser sessions; unit tests should not need
+  a Next request context to assert the stream body.
+
+### Next cycle (Cycle 5) direction
+Phase 6 — design rules read structured BOM fields (value, mpn) not LLM
+prose regex. Currently `/100nF/` matches "100nF" but misses "0.1µF
+MLCC X7R 0402" for the same part. Add `value?`, `mpn?` to `BomItem`,
+have the BOM prompt emit them, rewrite rules to check structured
+fields with regex fallback for old projects.
+
+Deferring Phase 5 (SQLite) AGAIN — still zero production users.
+Deferring Phase 7 (improve-design replacement) until Phase 6 lands —
+rules get cleaner with structured fields, making replacement diffs
+easier to express.
