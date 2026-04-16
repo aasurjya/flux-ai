@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CircuitGraph } from "./circuit-graph";
 import type { CircuitBlock } from "@/types/project";
+import * as React from "react";
+import { createRoot } from "react-dom/client";
 
 const blocks: CircuitBlock[] = [
   { id: "usb-in", label: "USB-C", kind: "interface", connections: ["pwr-prot"] },
@@ -57,11 +59,13 @@ describe("CircuitGraph", () => {
 
   it("sizes viewBox to fit all blocks (no clipping)", () => {
     const html = renderToStaticMarkup(<CircuitGraph blocks={blocks} />);
-    const viewBox = html.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
-    expect(viewBox).not.toBeNull();
-    const [, wStr, hStr] = viewBox!;
-    const w = parseFloat(wStr);
-    const h = parseFloat(hStr);
+    // Match the main SVG viewBox (first one with large dimensions, not the marker's 10x10)
+    const allViewBoxes = [...html.matchAll(/viewBox="([\d.-]+) ([\d.-]+) ([\d.]+) ([\d.]+)"/g)];
+    // Find the one with width > 100 (the main SVG, not the marker)
+    const main = allViewBoxes.find((m) => parseFloat(m[3]) > 100);
+    expect(main).not.toBeUndefined();
+    const w = parseFloat(main![3]);
+    const h = parseFloat(main![4]);
     expect(w).toBeGreaterThan(400);
     expect(h).toBeGreaterThan(64);
   });
@@ -78,5 +82,48 @@ describe("CircuitGraph", () => {
     expect(legendRegion).toContain("sensor");
     expect(legendRegion).not.toContain(">storage<");
     expect(legendRegion).not.toContain(">analog<");
+  });
+
+  it("renders zoom controls (+/- buttons)", () => {
+    const html = renderToStaticMarkup(<CircuitGraph blocks={blocks} />);
+    expect(html).toContain("Zoom in");
+    expect(html).toContain("Zoom out");
+  });
+
+  it("renders blocks as clickable (cursor-pointer)", () => {
+    const html = renderToStaticMarkup(<CircuitGraph blocks={blocks} />);
+    expect(html).toContain("cursor-pointer");
+  });
+
+  it("clicking a block shows a detail popover in jsdom", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await React.act(() => {
+      root.render(<CircuitGraph blocks={blocks} />);
+    });
+
+    // Click the first block group (SVG elements use dispatchEvent)
+    const firstBlock = container.querySelector("[data-block-id]");
+    expect(firstBlock).not.toBeNull();
+    await React.act(() => {
+      firstBlock!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    // Popover should appear with block details
+    const popover = container.querySelector("[data-testid='block-popover']");
+    expect(popover).not.toBeNull();
+    expect(popover!.textContent).toContain(blocks[0].label);
+
+    // Click again to dismiss
+    await React.act(() => {
+      firstBlock!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const dismissed = container.querySelector("[data-testid='block-popover']");
+    expect(dismissed).toBeNull();
+
+    root.unmount();
+    document.body.removeChild(container);
   });
 });

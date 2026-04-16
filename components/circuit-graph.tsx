@@ -1,3 +1,7 @@
+"use client";
+
+import * as React from "react";
+import { ZoomIn, ZoomOut } from "lucide-react";
 import type { CircuitBlock, CircuitBlockKind } from "@/types/project";
 
 /**
@@ -115,6 +119,12 @@ function connectionPath(from: Placed, to: Placed): string {
 }
 
 export function CircuitGraph({ blocks, className }: CircuitGraphProps) {
+  const [zoom, setZoom] = React.useState(1);
+  const [pan, setPan] = React.useState({ x: 0, y: 0 });
+  const [selectedBlockId, setSelectedBlockId] = React.useState<string | null>(null);
+  const dragging = React.useRef(false);
+  const lastPointer = React.useRef({ x: 0, y: 0 });
+
   if (!blocks || blocks.length === 0) {
     return (
       <div className={`rounded-xl border border-dashed border-border/70 bg-background/20 p-8 text-center text-sm text-muted-foreground ${className ?? ""}`}>
@@ -141,87 +151,207 @@ export function CircuitGraph({ blocks, className }: CircuitGraphProps) {
   }
 
   // Legend: only show kinds actually present in this graph.
-  // Deduplicate preserving declaration order for stable rendering.
   const presentKinds = Array.from(
     new Set(blocks.map((b) => b.kind))
   ) as CircuitBlockKind[];
 
+  const selectedBlock = selectedBlockId ? blocks.find((b) => b.id === selectedBlockId) : null;
+  const selectedPlaced = selectedBlockId ? byId.get(selectedBlockId) : null;
+
+  // ViewBox computed from zoom + pan (use || 0 to avoid -0 in SSR)
+  const vbW = width / zoom;
+  const vbH = height / zoom;
+  const vbX = (-pan.x / zoom) || 0;
+  const vbY = (-pan.y / zoom) || 0;
+
+  function handleWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setZoom((z) => Math.min(3, Math.max(0.3, z + delta)));
+  }
+
+  function handlePointerDown(e: React.PointerEvent) {
+    // Only pan on middle-click or when not clicking a block
+    if (e.button !== 0 && e.button !== 1) return;
+    dragging.current = true;
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    if (!dragging.current) return;
+    const dx = e.clientX - lastPointer.current.x;
+    const dy = e.clientY - lastPointer.current.y;
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
+  }
+
+  function handlePointerUp() {
+    dragging.current = false;
+  }
+
+  function handleBlockClick(blockId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    setSelectedBlockId((prev) => (prev === blockId ? null : blockId));
+  }
+
+  function zoomIn() {
+    setZoom((z) => Math.min(3, z + 0.2));
+  }
+
+  function zoomOut() {
+    setZoom((z) => Math.max(0.3, z - 0.2));
+  }
+
   return (
     <div className={`space-y-2 ${className ?? ""}`}>
-      <div className="overflow-x-auto rounded-xl border border-border/60 bg-background/40 p-2">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        width={width}
-        height={height}
-        role="img"
-        aria-label={`Circuit block diagram with ${blocks.length} blocks and ${edges.length} connections`}
-        className="max-w-full"
-      >
-        <defs>
-          <marker
-            id="arrow"
-            viewBox="0 0 10 10"
-            refX="9"
-            refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
+      <div className="relative overflow-hidden rounded-xl border border-border/60 bg-background/40 p-2">
+        {/* Zoom controls */}
+        <div className="absolute right-3 top-3 z-10 flex gap-1">
+          <button
+            type="button"
+            onClick={zoomIn}
+            aria-label="Zoom in"
+            className="rounded-md border border-border/60 bg-background/80 p-1.5 text-muted-foreground hover:text-foreground backdrop-blur-sm"
           >
-            <path d="M0,0 L10,5 L0,10 z" fill="#71717a" />
-          </marker>
-        </defs>
+            <ZoomIn className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={zoomOut}
+            aria-label="Zoom out"
+            className="rounded-md border border-border/60 bg-background/80 p-1.5 text-muted-foreground hover:text-foreground backdrop-blur-sm"
+          >
+            <ZoomOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
 
-        {/* Connections first so they sit behind blocks */}
-        <g data-testid="circuit-edges">
-          {edges.map(({ from, to }, i) => (
-            <path
-              key={i}
-              d={connectionPath(from, to)}
-              fill="none"
-              stroke="#71717a"
-              strokeWidth="1.5"
-              strokeDasharray="0"
-              markerEnd="url(#arrow)"
-            />
-          ))}
-        </g>
+        <svg
+          viewBox={`${vbX} ${vbY} ${vbW} ${vbH}`}
+          width={width}
+          height={height}
+          role="img"
+          aria-label={`Circuit block diagram with ${blocks.length} blocks and ${edges.length} connections`}
+          className="max-w-full cursor-grab active:cursor-grabbing"
+          onWheel={handleWheel}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+        >
+          <defs>
+            <marker
+              id="arrow"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M0,0 L10,5 L0,10 z" fill="#71717a" />
+            </marker>
+          </defs>
 
-        {/* Blocks on top */}
-        <g data-testid="circuit-nodes">
-          {placed.map(({ block, x, y }) => (
-            <g key={block.id} transform={`translate(${x}, ${y})`}>
-              <rect
-                width={BLOCK_W}
-                height={BLOCK_H}
-                rx={10}
-                fill={KIND_FILL[block.kind]}
-                stroke={KIND_STROKE[block.kind]}
+          {/* Connections first so they sit behind blocks */}
+          <g data-testid="circuit-edges">
+            {edges.map(({ from, to }, i) => (
+              <path
+                key={i}
+                d={connectionPath(from, to)}
+                fill="none"
+                stroke="#71717a"
                 strokeWidth="1.5"
+                strokeDasharray="0"
+                markerEnd="url(#arrow)"
               />
-              <text
-                x={BLOCK_W / 2}
-                y={BLOCK_H / 2 - 4}
-                textAnchor="middle"
-                fontSize="13"
-                fontWeight="600"
-                fill="#f4f4f5"
+            ))}
+          </g>
+
+          {/* Blocks on top — clickable */}
+          <g data-testid="circuit-nodes">
+            {placed.map(({ block, x, y }) => (
+              <g
+                key={block.id}
+                transform={`translate(${x}, ${y})`}
+                data-block-id={block.id}
+                className="cursor-pointer"
+                onClick={(e) => handleBlockClick(block.id, e)}
+                role="button"
+                tabIndex={0}
+                aria-label={`${block.label} (${block.kind})`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedBlockId((prev) => (prev === block.id ? null : block.id));
+                  }
+                }}
               >
-                {block.label}
-              </text>
-              <text
-                x={BLOCK_W / 2}
-                y={BLOCK_H / 2 + 14}
-                textAnchor="middle"
-                fontSize="10"
-                fill={KIND_STROKE[block.kind]}
-                opacity="0.85"
-              >
-                {block.kind}
-              </text>
-            </g>
-          ))}
-        </g>
-      </svg>
+                <rect
+                  width={BLOCK_W}
+                  height={BLOCK_H}
+                  rx={10}
+                  fill={KIND_FILL[block.kind]}
+                  stroke={selectedBlockId === block.id ? "#f4f4f5" : KIND_STROKE[block.kind]}
+                  strokeWidth={selectedBlockId === block.id ? 2.5 : 1.5}
+                />
+                <text
+                  x={BLOCK_W / 2}
+                  y={BLOCK_H / 2 - 4}
+                  textAnchor="middle"
+                  fontSize="13"
+                  fontWeight="600"
+                  fill="#f4f4f5"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {block.label}
+                </text>
+                <text
+                  x={BLOCK_W / 2}
+                  y={BLOCK_H / 2 + 14}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill={KIND_STROKE[block.kind]}
+                  opacity="0.85"
+                  style={{ pointerEvents: "none" }}
+                >
+                  {block.kind}
+                </text>
+              </g>
+            ))}
+          </g>
+        </svg>
+
+        {/* Block detail popover */}
+        {selectedBlock && selectedPlaced && (
+          <div
+            data-testid="block-popover"
+            className="absolute z-20 rounded-lg border border-border/70 bg-card/95 p-3 shadow-lg backdrop-blur-sm text-sm"
+            style={{
+              left: Math.min(selectedPlaced.x + BLOCK_W + 12, width - 180),
+              top: selectedPlaced.y
+            }}
+          >
+            <p className="font-medium text-foreground">{selectedBlock.label}</p>
+            <p className="text-xs text-muted-foreground">
+              {selectedBlock.kind} &middot; {selectedBlock.id}
+            </p>
+            {selectedBlock.connections.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-medium text-muted-foreground">Connects to:</p>
+                <ul className="mt-1 space-y-0.5">
+                  {selectedBlock.connections.map((cid) => {
+                    const target = blocks.find((b) => b.id === cid);
+                    return (
+                      <li key={cid} className="text-xs text-muted-foreground">
+                        {target ? `${target.label} (${target.kind})` : cid}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {/* Legend — only the kinds actually used in this graph */}
       <div
