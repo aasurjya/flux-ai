@@ -45,6 +45,39 @@ test.describe("Create project flow", () => {
     await expect(page.getByText("Low-cost BOM")).toBeVisible();
   });
 
+  test("inline validation shows errors on blur without page reload", async ({ page }, testInfo) => {
+    const getErrors = guardConsole(page, testInfo);
+    await page.goto("/projects/new");
+
+    // Type a single character in name, then blur — should show min-length error
+    const nameField = page.getByLabel("Project name");
+    await nameField.fill("X");
+    await nameField.blur();
+    const nameError = page.getByText(/at least 2 characters/i);
+    await expect(nameError).toBeVisible();
+    // Error is linked to the field via aria-describedby
+    const nameDescribedBy = await nameField.getAttribute("aria-describedby");
+    expect(nameDescribedBy).toBeTruthy();
+
+    // Type a short prompt (< 10 chars), then blur — should show min-length error
+    const promptField = page.getByLabel("Design prompt");
+    await promptField.fill("short");
+    await promptField.blur();
+    const promptError = page.getByText(/at least 10 characters/i);
+    await expect(promptError).toBeVisible();
+
+    // Fix both fields — errors should disappear
+    await nameField.fill("Valid Name");
+    await nameField.blur();
+    await expect(nameError).not.toBeVisible();
+
+    await promptField.fill("A sufficiently long design prompt for testing");
+    await promptField.blur();
+    await expect(promptError).not.toBeVisible();
+
+    expect(getErrors()).toEqual([]);
+  });
+
   test("AI audit: new-project form page", async ({ page }) => {
     await page.goto("/projects/new");
     const audit = await auditPage(page, {

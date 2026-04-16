@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { useActionState } from "react";
 import { ChevronRight } from "lucide-react";
@@ -13,8 +14,19 @@ interface ProjectFormProps {
   action: (prevState: unknown, formData: FormData) => Promise<{ error: string } | void>;
 }
 
+function validateField(name: string, value: string): string | null {
+  if (name === "name" && value.length > 0 && value.length < 2) {
+    return "Name must be at least 2 characters";
+  }
+  if (name === "prompt" && value.length > 0 && value.length < 10) {
+    return "Prompt must be at least 10 characters";
+  }
+  return null;
+}
+
 export function ProjectForm({ action }: ProjectFormProps) {
   const [state, formAction] = useActionState(action, undefined);
+  const [fieldErrors, setFieldErrors] = React.useState<Record<string, string | null>>({});
 
   return (
     <form action={formAction} className="space-y-5">
@@ -23,7 +35,19 @@ export function ProjectForm({ action }: ProjectFormProps) {
         <label className="text-sm font-medium text-foreground" htmlFor="name">
           Project name
         </label>
-        <Input id="name" name="name" placeholder="ESP32 wearable sensor hub" required />
+        <Input
+          id="name"
+          name="name"
+          placeholder="ESP32 wearable sensor hub"
+          required
+          aria-describedby={fieldErrors.name ? "name-error" : undefined}
+          onBlur={(e) =>
+            setFieldErrors((prev) => ({ ...prev, name: validateField("name", e.target.value) }))
+          }
+        />
+        {fieldErrors.name && (
+          <p id="name-error" className="text-xs text-rose-400">{fieldErrors.name}</p>
+        )}
       </div>
       <div className="space-y-2">
         <label className="text-sm font-medium text-foreground" htmlFor="prompt">
@@ -34,7 +58,14 @@ export function ProjectForm({ action }: ProjectFormProps) {
           name="prompt"
           placeholder="Design a battery-powered ESP32-S3 board with USB-C charging, IMU over I2C, status LEDs, and a compact 2-layer layout target."
           required
+          aria-describedby={fieldErrors.prompt ? "prompt-error" : undefined}
+          onBlur={(e) =>
+            setFieldErrors((prev) => ({ ...prev, prompt: validateField("prompt", e.target.value) }))
+          }
         />
+        {fieldErrors.prompt && (
+          <p id="prompt-error" className="text-xs text-rose-400">{fieldErrors.prompt}</p>
+        )}
       </div>
       <div className="grid gap-5 sm:grid-cols-2">
         <div className="space-y-2">
