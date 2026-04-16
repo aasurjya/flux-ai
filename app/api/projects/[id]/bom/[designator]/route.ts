@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getProjectById, patchBomItem } from "@/lib/project-store";
+import { patchBomItem } from "@/lib/project-store";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
@@ -76,27 +76,22 @@ export async function PATCH(
     );
   }
 
-  // Check project + designator existence BEFORE taking the store lock
-  // so we return the right status code quickly.
-  const project = await getProjectById(id);
-  if (!project) {
-    return Response.json({ error: "Project not found" }, { status: 404 });
-  }
-  if (!project.outputs.bom.some((b) => b.designator === designator)) {
+  try {
+    const updated = await patchBomItem({
+      projectId: id,
+      designator,
+      patch: parsed.data
+    });
+
     return Response.json(
-      { error: `No BOM item with designator ${designator}` },
-      { status: 404 }
+      { bom: updated.outputs.bom, revisionCount: updated.revisions.length },
+      { status: 200 }
     );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Patch failed";
+    if (/not found/i.test(message)) {
+      return Response.json({ error: message }, { status: 404 });
+    }
+    throw err;
   }
-
-  const updated = await patchBomItem({
-    projectId: id,
-    designator,
-    patch: parsed.data
-  });
-
-  return Response.json(
-    { bom: updated.outputs.bom, revisionCount: updated.revisions.length },
-    { status: 200 }
-  );
 }

@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { PATCH } from "./route";
 import { createProject, generateProject, getProjectById } from "@/lib/project-store";
 import { createStubAiClient } from "@/lib/ai/stub-client";
+import * as persistence from "@/lib/store/persistence";
 
 async function params(id: string, designator: string) {
   return { params: Promise.resolve({ id, designator }) };
@@ -141,6 +142,25 @@ describe("PATCH /api/projects/[id]/bom/[designator]", () => {
     const after = await getProjectById(id);
     const patched = after!.outputs.bom.find((b) => b.designator === targetDesignator);
     expect(patched!.value).toBeUndefined();
+  });
+
+  it("reads the store at most once during a successful PATCH (no redundant pre-check)", async () => {
+    const id = await seedProject();
+    const before = await getProjectById(id);
+    const targetDesignator = before!.outputs.bom[0].designator;
+
+    const spy = vi.spyOn(persistence, "readStoredProjects");
+    spy.mockClear();
+
+    const res = await PATCH(
+      bodyRequest({ status: "selected" }) as Parameters<typeof PATCH>[0],
+      await params(id, targetDesignator)
+    );
+    expect(res.status).toBe(200);
+    // patchBomItem reads once inside the lock — no extra getProjectById pre-read
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    spy.mockRestore();
   });
 
   it("does not allow changing designator via PATCH (PATCH is scoped to designator)", async () => {
