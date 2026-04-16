@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { getProjectById, patchBomItem } from "@/lib/project-store";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 30 });
 
 /**
  * PATCH /api/projects/[id]/bom/[designator]
@@ -38,6 +41,14 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; designator: string }> }
 ) {
+  const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (!limiter.check(clientIp)) {
+    return Response.json(
+      { error: "Too many edit requests. Try again in a minute." },
+      { status: 429, headers: { "Retry-After": "60" } }
+    );
+  }
+
   const { id, designator } = await params;
 
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) {

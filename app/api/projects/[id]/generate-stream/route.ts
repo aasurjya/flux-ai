@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { generateProject } from "@/lib/project-store";
+import { createRateLimiter } from "@/lib/rate-limit";
 import type { PipelineStage, StageStatus } from "@/lib/ai/pipeline";
+
+const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 3 });
 
 /**
  * GET /api/projects/[id]/generate-stream
@@ -27,6 +30,14 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const clientIp = _req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (!limiter.check(clientIp)) {
+    return new Response("Too many generation requests. Try again in a minute.", {
+      status: 429,
+      headers: { "Retry-After": "60" }
+    });
+  }
+
   const { id } = await params;
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) {
     return new Response("Invalid project id", { status: 400 });

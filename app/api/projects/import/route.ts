@@ -1,6 +1,9 @@
 import { NextRequest } from "next/server";
 import { importProject } from "@/lib/project-store";
 import { ProjectSummarySchema } from "@/lib/project-schema";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
 
 /**
  * POST /api/projects/import
@@ -18,6 +21,14 @@ import { ProjectSummarySchema } from "@/lib/project-schema";
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB — imports don't need to be big
 
 export async function POST(request: NextRequest) {
+  const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  if (!limiter.check(clientIp)) {
+    return Response.json(
+      { error: "Too many import requests. Try again in a minute." },
+      { status: 429, headers: { "Retry-After": "60" } }
+    );
+  }
+
   const lengthHeader = request.headers.get("content-length");
   if (lengthHeader && Number(lengthHeader) > MAX_BYTES) {
     return Response.json({ error: "Payload too large (max 5 MB)" }, { status: 413 });
